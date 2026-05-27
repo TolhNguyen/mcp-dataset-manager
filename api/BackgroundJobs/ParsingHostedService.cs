@@ -156,7 +156,7 @@ public class ParsingHostedService(
                 Status = "ready",
                 TableCount = parsed.Tables.Count,
                 TotalRows = parsed.Tables.Sum(t => t.RowCount),
-                ProcessedAt = DateTimeOffset.UtcNow
+                ProcessedAt = DateTime.UtcNow
             };
 
             var manifestPath = storage.GetManifestPath(job.UserId, job.DatasetId);

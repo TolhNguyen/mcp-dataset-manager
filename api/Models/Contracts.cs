@@ -31,8 +31,8 @@ public record DatasetRecord(
     int TableCount,
     long TotalRows,
     string? ErrorMessage,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset? ProcessedAt
+    DateTime CreatedAt,
+    DateTime? ProcessedAt
 );
 
 public record DatasetTableRecord(

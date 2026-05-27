@@ -61,8 +61,6 @@ public class DuckDbQueryService(
             // Apply per-query safety limits.
             ExecNonQuery(conn, $"SET memory_limit='{configuration["Query:MemoryLimit"] ?? "1GB"}'");
             var timeoutSec = configuration.GetValue<int?>("Query:TimeoutSeconds") ?? 30;
-            // DuckDB uses milliseconds for statement_timeout via SET; some versions use SET timeout.
-            ExecNonQuery(conn, $"SET statement_timeout='{timeoutSec * 1000}ms'");
 
             foreach (var t in tables)
             {

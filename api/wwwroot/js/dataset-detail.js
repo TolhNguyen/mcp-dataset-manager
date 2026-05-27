@@ -63,10 +63,14 @@ const DatasetDetail = {
             ${errorBlock}
 
             <div class="dataset-actions" style="margin-top:12px">
-                <a class="btn-link" href="${d.actions.download_manifest_url}">Tải manifest.md</a>
-                <a class="btn-link" href="${d.actions.download_original_url}">Tải file gốc</a>
+                <button class="btn-link" data-action="download" data-url="${escapeHtml(d.actions.download_manifest_url)}" data-filename="manifest.md">Tải manifest.md</button>
+                <button class="btn-link" data-action="download" data-url="${escapeHtml(d.actions.download_original_url)}" data-filename="${escapeHtml(d.original_file_name)}">Tải file gốc</button>
             </div>
         `;
+
+        $('#datasetCard').querySelectorAll('button[data-action="download"]').forEach(btn => {
+            btn.addEventListener('click', () => this.handleDownload(btn.dataset.url, btn.dataset.filename, btn));
+        });
 
         // Show subsequent cards only when the dataset is ready.
         const isReady = d.status === 'ready';
@@ -200,5 +204,58 @@ const DatasetDetail = {
         }
 
         status.innerHTML = html;
+    },
+
+    async handleDownload(url, filename, button) {
+        button.disabled = true;
+        try {
+            await downloadFileWithAuth(url, filename);
+        } catch (err) {
+            alert(err.message || 'Không tải được file.');
+        } finally {
+            button.disabled = false;
+        }
     }
 };
+
+async function downloadFileWithAuth(path, fallbackFileName) {
+    if (typeof Api.downloadFile === 'function') {
+        await Api.downloadFile(path, fallbackFileName);
+        return;
+    }
+
+    const headers = {};
+    if (Api.token) headers.Authorization = `Bearer ${Api.token}`;
+    const response = await fetch(path, { headers });
+
+    if (response.status === 401) {
+        Api.clearSession();
+        window.location.replace('/login.html');
+        throw new Error('Phiên đăng nhập đã hết hạn.');
+    }
+
+    if (!response.ok) {
+        throw new Error(response.statusText || `HTTP ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const fileName = getDownloadFileNameFromResponse(response, fallbackFileName);
+    const blobUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = fileName;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(blobUrl);
+}
+
+function getDownloadFileNameFromResponse(response, fallbackFileName) {
+    const header = response.headers.get('content-disposition') || '';
+    const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (encoded) return decodeURIComponent(encoded[1]);
+
+    const quoted = header.match(/filename="?([^";]+)"?/i);
+    return quoted ? quoted[1] : fallbackFileName;
+}

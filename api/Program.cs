@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
+using Dapper;
 using ExcelDatasetManager.Api.Auth;
 using ExcelDatasetManager.Api.BackgroundJobs;
 using ExcelDatasetManager.Api.Middleware;
@@ -74,11 +75,35 @@ builder.Services.AddCors(options =>
 // ============================================================
 
 var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+const string JwtCookieName = "edm_token";
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var hasBearerHeader =
+                    context.Request.Headers.TryGetValue("Authorization", out var authorization)
+                    && authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase);
+
+                if (!hasBearerHeader && context.Request.Cookies.TryGetValue(JwtCookieName, out var token))
+                {
+                    context.Token = token;
+                }
+                else if (!hasBearerHeader
+                         && IsDownloadPath(context.Request.Path)
+                         && context.Request.Query.TryGetValue("access_token", out var queryToken))
+                {
+                    context.Token = queryToken.ToString();
+                }
+
+                return Task.CompletedTask;
+            }
+        };
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
@@ -176,7 +201,7 @@ builder.WebHost.ConfigureKestrel(o =>
 // Services
 // ============================================================
 
-builder.Services.AddNpgsqlDataSource(connectionString);
+builder.Services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(connectionString));
 builder.Services.AddScoped<DatabaseInitializer>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DatasetService>();
@@ -199,9 +224,47 @@ var app = builder.Build();
 // Catch-all exception handler MUST be first so it wraps every other middleware.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+app.Use(async (ctx, next) =>
+{
+    if (TryGetBearerToken(ctx, out var bearerToken))
+    {
+        ctx.Response.OnStarting(() =>
+        {
+            SetJwtCookie(ctx, bearerToken);
+            return Task.CompletedTask;
+        });
+    }
+
+    if (IsDownloadPath(ctx.Request.Path)
+        && !TryGetBearerToken(ctx, out _)
+        && !ctx.Request.Cookies.ContainsKey(JwtCookieName)
+        && !ctx.Request.Query.ContainsKey("access_token"))
+    {
+        ctx.Response.ContentType = "text/html; charset=utf-8";
+        await ctx.Response.WriteAsync(GetDownloadBridgeHtml(), ctx.RequestAborted);
+        return;
+    }
+
+    await next();
+});
+
 app.UseCors();
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = ctx =>
+    {
+        var path = ctx.File.PhysicalPath;
+        if (path is not null
+            && (path.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                || path.EndsWith(".js", StringComparison.OrdinalIgnoreCase)))
+        {
+            ctx.Context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+            ctx.Context.Response.Headers.Pragma = "no-cache";
+            ctx.Context.Response.Headers.Expires = "0";
+        }
+    }
+});
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -213,6 +276,21 @@ app.UseAuthorization();
 using (var scope = app.Services.CreateScope())
 {
     await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync();
+
+    var dataSource = scope.ServiceProvider.GetRequiredService<NpgsqlDataSource>();
+    var parsingQueue = scope.ServiceProvider.GetRequiredService<ParsingJobQueue>();
+    await using var conn = await dataSource.OpenConnectionAsync();
+    var pendingJobs = await conn.QueryAsync<PendingParsingJobRow>("""
+        SELECT user_id AS UserId, id AS DatasetId
+        FROM datasets
+        WHERE status = 'processing'
+        ORDER BY created_at
+        """);
+
+    foreach (var job in pendingJobs)
+    {
+        await parsingQueue.EnqueueAsync(new ParsingJob(job.UserId, job.DatasetId), CancellationToken.None);
+    }
 }
 
 // ============================================================
@@ -223,17 +301,27 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok", app = "Excel Dataset
 
 var auth = app.MapGroup("/api/auth").RequireRateLimiting("auth");
 
-auth.MapPost("/register", async (RegisterRequest req, AuthService svc, CancellationToken ct) =>
+auth.MapPost("/register", async (RegisterRequest req, HttpContext ctx, AuthService svc, CancellationToken ct) =>
 {
     var result = await svc.RegisterAsync(req, ct);
+    if (result.Success)
+    {
+        SetJwtCookie(ctx, result.Data!.Token);
+    }
+
     return result.Success
         ? Results.Ok(new { success = true, user = result.Data!.User, token = result.Data.Token })
         : Results.BadRequest(new { success = false, error = result.Error });
 });
 
-auth.MapPost("/login", async (LoginRequest req, AuthService svc, CancellationToken ct) =>
+auth.MapPost("/login", async (LoginRequest req, HttpContext ctx, AuthService svc, CancellationToken ct) =>
 {
     var result = await svc.LoginAsync(req, ct);
+    if (result.Success)
+    {
+        SetJwtCookie(ctx, result.Data!.Token);
+    }
+
     return result.Success
         ? Results.Ok(new { success = true, user = result.Data!.User, token = result.Data.Token })
         : Results.BadRequest(new { success = false, error = result.Error });
@@ -249,11 +337,15 @@ auth.MapGet("/me", async (ClaimsPrincipal principal, AuthService svc, Cancellati
         : Results.Unauthorized();
 }).RequireAuthorization();
 
-auth.MapPost("/logout", () => Results.Ok(new
+auth.MapPost("/logout", (HttpContext ctx) =>
 {
-    success = true,
-    message = "Token issuance is stateless — client should discard its token."
-})).RequireAuthorization();
+    ClearJwtCookie(ctx);
+    return Results.Ok(new
+    {
+        success = true,
+        message = "Token issuance is stateless — client should discard its token."
+    });
+}).RequireAuthorization();
 
 // ============================================================
 // Dataset endpoints
@@ -418,3 +510,113 @@ app.MapPost("/api/datasets/{datasetId:guid}/query",
 .RequireRateLimiting("query");
 
 app.Run();
+
+static void SetJwtCookie(HttpContext ctx, string token)
+{
+    ctx.Response.Cookies.Append("edm_token", token, new CookieOptions
+    {
+        HttpOnly = false,
+        SameSite = SameSiteMode.Lax,
+        Secure = ctx.Request.IsHttps,
+        Path = "/",
+        MaxAge = TimeSpan.FromDays(7)
+    });
+}
+
+static void ClearJwtCookie(HttpContext ctx)
+{
+    ctx.Response.Cookies.Delete("edm_token", new CookieOptions
+    {
+        SameSite = SameSiteMode.Lax,
+        Secure = ctx.Request.IsHttps,
+        Path = "/"
+    });
+}
+
+static bool IsDownloadPath(PathString path)
+{
+    return path.StartsWithSegments("/api/datasets", out var remaining)
+           && remaining.Value?.Contains("/download/", StringComparison.OrdinalIgnoreCase) == true;
+}
+
+static bool TryGetBearerToken(HttpContext ctx, out string token)
+{
+    token = "";
+    if (!ctx.Request.Headers.TryGetValue("Authorization", out var authorization))
+    {
+        return false;
+    }
+
+    const string prefix = "Bearer ";
+    var value = authorization.ToString();
+    if (!value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+    {
+        return false;
+    }
+
+    token = value[prefix.Length..].Trim();
+    return !string.IsNullOrWhiteSpace(token);
+}
+
+static string GetDownloadBridgeHtml() => """
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <title>Dang tai file...</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 48px; color: #0f172a; }
+        .muted { color: #64748b; }
+        .error { color: #b91c1c; }
+    </style>
+</head>
+<body>
+    <h1>Dang tai file...</h1>
+    <p id="status" class="muted">Vui long doi trong giay lat.</p>
+    <p><a href="/dashboard.html">Quay lai dashboard</a></p>
+    <script>
+    (async () => {
+        const status = document.getElementById('status');
+        const token = localStorage.getItem('edm_token');
+        if (!token) {
+            window.location.replace('/login.html');
+            return;
+        }
+
+        try {
+            const response = await fetch(window.location.href, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (!response.ok) {
+                status.className = 'error';
+                status.textContent = `Khong tai duoc file (HTTP ${response.status}).`;
+                return;
+            }
+
+            const blob = await response.blob();
+            const disposition = response.headers.get('content-disposition') || '';
+            const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+            const quoted = disposition.match(/filename="?([^";]+)"?/i);
+            const fileName = encoded ? decodeURIComponent(encoded[1]) : quoted ? quoted[1] : 'download';
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            status.textContent = 'Da bat dau tai file.';
+            setTimeout(() => history.length > 1 ? history.back() : window.location.replace('/dashboard.html'), 700);
+        } catch (err) {
+            status.className = 'error';
+            status.textContent = err.message || 'Khong tai duoc file.';
+        }
+    })();
+    </script>
+</body>
+</html>
+""";
+
+internal sealed record PendingParsingJobRow(Guid UserId, Guid DatasetId);

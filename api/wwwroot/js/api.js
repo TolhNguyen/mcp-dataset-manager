@@ -3,12 +3,22 @@
 
 const TOKEN_KEY = 'edm_token';
 const USER_KEY = 'edm_user';
+const TOKEN_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 const Api = {
-    get token() { return localStorage.getItem(TOKEN_KEY); },
+    get token() {
+        const value = localStorage.getItem(TOKEN_KEY);
+        syncTokenCookie(value);
+        return value;
+    },
     set token(value) {
-        if (value) localStorage.setItem(TOKEN_KEY, value);
-        else localStorage.removeItem(TOKEN_KEY);
+        if (value) {
+            localStorage.setItem(TOKEN_KEY, value);
+            syncTokenCookie(value);
+        } else {
+            localStorage.removeItem(TOKEN_KEY);
+            syncTokenCookie(null);
+        }
     },
 
     get user() {
@@ -71,6 +81,22 @@ const Api = {
     post(path, body) { return this.request('POST', path, { body }); },
     delete(path) { return this.request('DELETE', path); },
 
+    async downloadFile(path, fallbackFileName) {
+        const response = await this.request('GET', path);
+        const blob = await response.blob();
+        const fileName = getDownloadFileName(response, fallbackFileName);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+
+        link.href = url;
+        link.download = fileName;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    },
+
     async uploadDataset(file, name) {
         const fd = new FormData();
         fd.append('file', file);
@@ -115,4 +141,21 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+function syncTokenCookie(token) {
+    if (token) {
+        document.cookie = `${TOKEN_KEY}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=${TOKEN_MAX_AGE_SECONDS}`;
+    } else {
+        document.cookie = `${TOKEN_KEY}=; Path=/; SameSite=Lax; Max-Age=0`;
+    }
+}
+
+function getDownloadFileName(response, fallbackFileName) {
+    const header = response.headers.get('content-disposition') || '';
+    const encoded = header.match(/filename\*=UTF-8''([^;]+)/i);
+    if (encoded) return decodeURIComponent(encoded[1]);
+
+    const quoted = header.match(/filename="?([^";]+)"?/i);
+    return quoted ? quoted[1] : fallbackFileName;
 }

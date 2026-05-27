@@ -153,6 +153,6 @@ public class ApiKeyAuthenticationHandler(
             .TrimEnd('=');
     }
 
-    private sealed record UserKeyRow(Guid Id, Guid UserId, DateTimeOffset? RevokedAt);
-    private sealed record DatasetKeyRow(Guid Id, Guid DatasetId, Guid UserId, DateTimeOffset? RevokedAt);
+    private sealed record UserKeyRow(Guid Id, Guid UserId, DateTime? RevokedAt);
+    private sealed record DatasetKeyRow(Guid Id, Guid DatasetId, Guid UserId, DateTime? RevokedAt);
 }

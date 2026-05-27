@@ -378,7 +378,7 @@ public class DatasetService(
 
     private sealed record DatasetListRow(
         Guid DatasetId, string Name, string OriginalFileName, string FileType, long FileSizeBytes,
-        int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTimeOffset CreatedAt);
+        int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt);
 
     private sealed record TableRow(Guid Id, string TableName, string SourceName, string SourceType, long RowCount, int ColumnCount);
     private sealed record ColumnRow(
@@ -393,7 +393,7 @@ public class DatasetService(
 
 public record DatasetListItem(
     Guid DatasetId, string Name, string OriginalFileName, string FileType, long FileSizeBytes,
-    int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTimeOffset CreatedAt,
+    int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt,
     object Actions);
 
 public record DatasetLimit(int MaxDatasets, int Used, int Remaining, bool CanUpload);
