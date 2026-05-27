@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Đăng nhập — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="auth-page">
+<main class="auth-card">
+    <h1>Đăng nhập</h1>
+    <p class="muted">Tải lên file Excel/CSV, sau đó cho phép Claude truy vấn dữ liệu của bạn.</p>
+
+    <form id="loginForm" novalidate>
+        <label>
+            <span>Email</span>
+            <input type="email" name="email" required autocomplete="email" />
+        </label>
+        <label>
+            <span>Mật khẩu</span>
+            <input type="password" name="password" required autocomplete="current-password" />
+        </label>
+        <button type="submit" id="submitBtn">Đăng nhập</button>
+    </form>
+
+    <div id="error" class="error" hidden></div>
+
+    <p class="auth-switch">
+        Chưa có tài khoản?
+        <a href="/register.html">Tạo tài khoản mới</a>
+    </p>
+</main>
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+    AuthPage.bindLogin();
+</script>
+</body>
+</html>

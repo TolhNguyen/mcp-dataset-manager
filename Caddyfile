@@ -1,0 +1,8 @@
+{$EDM_DOMAIN:localhost} {
+    encode gzip
+
+    @mcp path /mcp /mcp/*
+    reverse_proxy @mcp bridge:5848
+
+    reverse_proxy api:8080
+}

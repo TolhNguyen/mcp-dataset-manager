@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <title>Excel Dataset Manager</title>
+    <script>
+        // Quick router: anyone with a token goes to dashboard, others to login.
+        const token = localStorage.getItem('edm_token');
+        window.location.replace(token ? '/dashboard.html' : '/login.html');
+    </script>
+</head>
+<body></body>
+</html>

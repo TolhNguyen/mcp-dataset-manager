@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Dataset — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+    <h1><a href="/dashboard.html">Excel Dataset Manager</a></h1>
+    <div class="topbar-right">
+        <span id="userEmail" class="muted"></span>
+        <button id="logoutBtn" class="btn-link">Đăng xuất</button>
+    </div>
+</header>
+
+<main class="container">
+    <p><a href="/dashboard.html">&larr; Quay lại danh sách</a></p>
+
+    <section class="card" id="datasetCard">
+        <p class="muted">Đang tải dataset…</p>
+    </section>
+
+    <section class="card" id="tablesCard" hidden>
+        <h2>Bảng &amp; cột</h2>
+        <div id="tables"></div>
+    </section>
+
+    <section class="card" id="apiKeysCard" hidden>
+        <header class="card-head">
+            <h2>API key cho Claude / MCP</h2>
+        </header>
+        <p class="muted">
+            API key cho phép Claude hoặc client khác truy vấn dataset này mà không cần mật khẩu của bạn.
+            Mỗi key chỉ truy cập đúng dataset này (read-only).
+        </p>
+
+        <form id="newKeyForm" class="inline-form">
+            <input type="text" name="name" required placeholder="Tên dễ nhớ, ví dụ: claude-desktop" />
+            <button type="submit">Tạo API key</button>
+        </form>
+
+        <div id="newKeyResult" class="status-msg" hidden></div>
+
+        <table class="data-table" id="apiKeyTable">
+            <thead>
+            <tr>
+                <th>Tên</th>
+                <th>Tạo lúc</th>
+                <th>Lần dùng cuối</th>
+                <th>Trạng thái</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </section>
+
+    <section class="card" id="queryCard" hidden>
+        <h2>Thử truy vấn SQL</h2>
+        <p class="muted">
+            Gõ một câu <code>SELECT</code> / <code>WITH</code> theo manifest. Server sẽ tự thêm
+            <code>LIMIT 100</code> nếu bạn không chỉ định.
+        </p>
+        <textarea id="sqlInput" rows="6" placeholder="SELECT * FROM raw_xxx LIMIT 10"></textarea>
+        <div class="form-row">
+            <label>
+                Max rows:
+                <input type="number" id="maxRows" min="1" max="1000" value="100" />
+            </label>
+            <button id="runQueryBtn">Chạy</button>
+        </div>
+        <div id="queryStatus" class="status-msg" hidden></div>
+        <div id="queryResult" hidden>
+            <h3>Kết quả</h3>
+            <div class="result-meta muted" id="queryMeta"></div>
+            <div class="table-scroll">
+                <table id="resultTable" class="data-table"></table>
+            </div>
+        </div>
+    </section>
+</main>
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/dataset-detail.js"></script>
+<script src="/js/api-keys.js"></script>
+<script>
+    DatasetDetail.init();
+</script>
+</body>
+</html>

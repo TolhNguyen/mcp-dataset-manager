@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: edm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-excel_dataset_manager}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-excel_dataset_manager}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: edm-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ConnectionStrings__Default: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-excel_dataset_manager};Username=${POSTGRES_USER:-app};Password=${POSTGRES_PASSWORD:-app_password}"
+      Jwt__Key: ${JWT_KEY}
+      Jwt__Issuer: ${JWT_ISSUER:-ExcelDatasetManager}
+      Jwt__Audience: ${JWT_AUDIENCE:-ExcelDatasetManagerFrontend}
+      Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:-*}
+      Upload__MaxFileSizeMb: ${MAX_UPLOAD_MB:-100}
+      Query__DefaultLimit: ${QUERY_DEFAULT_LIMIT:-100}
+      Query__HardMaxRows: ${QUERY_HARD_MAX_ROWS:-1000}
+      Query__TimeoutSeconds: ${QUERY_TIMEOUT_SECONDS:-30}
+      Query__MemoryLimit: ${QUERY_MEMORY_LIMIT:-1GB}
+    ports:
+      - "${API_PORT:-5847}:8080"
+    volumes:
+      - storage_data:/app/storage
+
+  bridge:
+    build:
+      context: ./mcp-bridge
+      dockerfile: Dockerfile
+    container_name: edm-mcp-bridge
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NODE_ENV: production
+      MCP_CONFIG: /app/tools.md
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 5848
+      MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-180}
+      EDM_API_URL: http://api:8080
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-*}
+    volumes:
+      - ./mcp-bridge/tools.md:/app/tools.md:ro
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: edm-caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+      - bridge
+    environment:
+      EDM_DOMAIN: ${EDM_DOMAIN:-localhost}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  storage_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,387 @@
+# Tools Configuration
+
+This file is the single source of truth for what tools the remote MCP bridge exposes to Claude.
+Each fenced ` ```yaml ` block with a `type:` field is a declaration. Free text between
+blocks is documentation for humans and is ignored by the parser.
+
+**Three block kinds:**
+
+- `type: config` — global settings
+- `type: connection` — a remote endpoint + auth strategy
+- `type: tool` — a callable, referencing one connection
+
+To use this file:
+
+1. Copy it to `tools.md` next to the bridge: `cp tools.example.md tools.md`
+2. Set the server env vars referenced as `${VAR}`. Runtime vars like `${request.user_token}` are resolved from the incoming HTTP request.
+3. Edit the connections + tools to match your environment.
+4. Validate: `node dist/index.js validate ./tools.md`.
+5. Restart the bridge container.
+
+---
+
+## Global settings
+
+```yaml
+type: config
+log_level: info
+default_timeout_ms: 30000
+# 0 = unlimited. Set a cap if a partner API may return large payloads.
+max_response_bytes: 0
+```
+
+---
+
+## Connection: EDM (Excel Dataset Manager — your own server)
+
+```yaml
+type: connection
+id: edm
+base_url: ${EDM_API_URL}
+auth:
+  type: header
+  header: X-API-Key
+  value: ${request.user_token}
+default_headers:
+  Accept: application/json
+```
+
+## Connection: Partner A (OAuth2 client credentials)
+
+Replace with a real partner API. The bridge fetches a token once and caches it
+until shortly before expiry; on 401 it transparently refreshes once and retries.
+
+```yaml
+type: connection
+id: partner_a
+base_url: https://api.partner-a.example.com
+auth:
+  type: oauth2_client_credentials
+  token_url: https://auth.partner-a.example.com/oauth/token
+  client_id: ${PARTNER_A_CLIENT_ID}
+  client_secret: ${PARTNER_A_CLIENT_SECRET}
+  scope: invoices.read
+  # client_auth: body (default) | basic
+timeout_ms: 45000
+```
+
+## Connection: Partner B (HTTP basic auth)
+
+```yaml
+type: connection
+id: partner_b
+base_url: https://api.partner-b.example.com
+auth:
+  type: basic
+  username: ${PARTNER_B_USER}
+  password: ${PARTNER_B_PASS}
+```
+
+## Connection: GitHub (bearer token)
+
+A worked example for a real public API.
+
+```yaml
+type: connection
+id: github
+base_url: https://api.github.com
+auth:
+  type: bearer
+  token: ${GITHUB_TOKEN:-}
+default_headers:
+  Accept: application/vnd.github+json
+  X-GitHub-Api-Version: "2022-11-28"
+```
+
+---
+
+# EDM tools
+
+These give Claude the same access as the old hand-crafted EDM MCP server: list
+datasets, fetch schemas, run SQL, upload.
+
+## list_datasets
+
+```yaml
+type: tool
+name: list_datasets
+description: |
+  List every dataset the user has uploaded to Excel Dataset Manager. Returns
+  dataset_id (use this for other tools), name, original_file, status, table_count
+  and total_rows. Call this first when the user references their data without
+  naming a specific dataset.
+connection: edm
+method: GET
+path: /api/datasets/
+response_hint: |
+  Top-level shape is {success, limit, datasets[]}. Use datasets[].dataset_id
+  in subsequent calls. If limit.used == limit.max_datasets the user can't upload
+  new files until they delete one.
+```
+
+## get_dataset_schema
+
+```yaml
+type: tool
+name: get_dataset_schema
+description: |
+  Fetch the manifest.md for a dataset — describes tables, normalized SQL column
+  names, inferred types, sample values, and Vietnamese aliases. ALWAYS call this
+  before writing SQL against a dataset you haven't queried yet; original headers
+  are normalized and cannot be guessed.
+connection: edm
+method: GET
+path: /api/datasets/{dataset_id}/download/manifest
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_datasets.
+```
+
+## query_dataset
+
+```yaml
+type: tool
+name: query_dataset
+description: |
+  Run a read-only SQL query (SELECT or WITH) against one EDM dataset. Use the
+  normalized column names from get_dataset_schema, not the original Vietnamese
+  headers. Server forbids INSERT/UPDATE/DELETE/DROP/ATTACH/COPY/PRAGMA.
+connection: edm
+method: POST
+path: /api/datasets/{dataset_id}/query
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+  sql:
+    in: body
+    type: string
+    required: true
+    description: A single SELECT or WITH statement.
+  max_rows:
+    in: body
+    type: integer
+    default: 100
+    description: 1-1000.
+body_template: |
+  {
+    "query_type": "sql",
+    "sql": {{sql | json}},
+    "options": { "max_rows": {{max_rows}}, "include_sql": true }
+  }
+response_hint: |
+  Success path: result.columns + result.rows.
+  On error.code=COLUMN_NOT_FOUND, error.details.suggested_columns contains likely
+  fixes — retry with the suggested name.
+  On error.code=DATASET_NOT_READY, wait and retry (parsing is async).
+```
+
+## upload_dataset
+
+```yaml
+type: tool
+name: upload_dataset
+description: |
+  Upload an Excel/CSV file to EDM. In remote MCP mode, the file path must exist inside the bridge container/server; Claude.ai cannot read arbitrary files from the user's computer. For normal use, upload files through the web UI.
+  After upload, the file is processed in the background — poll get_dataset for
+  the status to flip from 'processing' to 'ready'.
+connection: edm
+method: POST
+path: /api/datasets/
+content_type: multipart/form-data
+params:
+  file:
+    in: form
+    type: file
+    required: true
+    description: Server/container path to .xlsx/.xls/.xlsm/.csv/.tsv (≤100 MB).
+  name:
+    in: form
+    type: string
+    description: Optional human-readable dataset name; defaults to filename.
+```
+
+## get_dataset (status polling)
+
+```yaml
+type: tool
+name: get_dataset
+description: |
+  Get the metadata for a single dataset including its current parsing status.
+  Use this after upload_dataset to wait for status='ready' before querying.
+connection: edm
+method: GET
+path: /api/datasets/{dataset_id}
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+response_hint: |
+  status='processing' means parsing in progress — wait and retry.
+  status='ready' means safe to query.
+  status='failed' means parsing crashed; error_message has details.
+```
+
+## delete_dataset
+
+```yaml
+type: tool
+name: delete_dataset
+description: |
+  Delete an EDM dataset PERMANENTLY (database row + parquet files + original
+  upload). Only call this when the user explicitly confirms.
+connection: edm
+method: DELETE
+path: /api/datasets/{dataset_id}
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+```
+
+---
+
+# Partner tools (reconciliation examples)
+
+The point of having multiple connections in one bridge: Claude can query EDM
+and a partner API in a single conversation and reconcile the two.
+
+## partner_a_invoices
+
+```yaml
+type: tool
+name: partner_a_invoices
+description: |
+  Fetch invoices from Partner A within a date range. Use this to reconcile
+  against the user's internal invoice data on EDM.
+connection: partner_a
+method: GET
+path: /v1/invoices
+params:
+  from:
+    in: query
+    type: string
+    required: true
+    description: Start date inclusive (YYYY-MM-DD).
+  to:
+    in: query
+    type: string
+    required: true
+    description: End date inclusive (YYYY-MM-DD).
+  status:
+    in: query
+    type: string
+    enum: [paid, pending, void]
+    default: paid
+  limit:
+    in: query
+    type: integer
+    default: 200
+response_transform: "$.invoices[*]"
+response_hint: |
+  After transform: an array of invoices, each {id, amount, issued_at, status, ...}.
+  To reconcile with EDM, match invoice.id against the raw_invoices.invoice_id column
+  in the user's EDM dataset (verify the SQL column name via get_dataset_schema).
+```
+
+## partner_a_invoice_detail
+
+```yaml
+type: tool
+name: partner_a_invoice_detail
+description: Fetch one invoice's full detail from Partner A by its id.
+connection: partner_a
+method: GET
+path: /v1/invoices/{invoice_id}
+params:
+  invoice_id:
+    in: path
+    type: string
+    required: true
+```
+
+## partner_b_orders
+
+```yaml
+type: tool
+name: partner_b_orders
+description: |
+  List Partner B orders with optional filters. Used for cross-checking
+  fulfillment data between the user's EDM dataset and Partner B's records.
+connection: partner_b
+method: GET
+path: /orders
+params:
+  from:
+    in: query
+    type: string
+    required: true
+  to:
+    in: query
+    type: string
+    required: true
+  customer_id:
+    in: query
+    type: string
+  tag:
+    in: query
+    type: array
+    items:
+      type: string
+    description: One or more tags; repeated as ?tag=a&tag=b in the URL.
+response_transform: "$.data[*]"
+```
+
+---
+
+# Public API examples
+
+These two work out of the box (assuming you have a GitHub token); they're here
+as a sanity check that the bridge is wired up correctly.
+
+## github_search_repos
+
+```yaml
+type: tool
+name: github_search_repos
+description: Search GitHub repositories by keyword. Useful for sanity-testing the bridge.
+connection: github
+method: GET
+path: /search/repositories
+params:
+  q:
+    in: query
+    type: string
+    required: true
+    description: GitHub search query, e.g. "duckdb language:typescript".
+  per_page:
+    in: query
+    type: integer
+    default: 10
+response_transform: "$.items[*]"
+response_hint: |
+  After transform: array of repos with fields like full_name, stargazers_count,
+  description, html_url. Useful for showing the user a short ranked list.
+```
+
+## github_user
+
+```yaml
+type: tool
+name: github_user
+description: Fetch a public GitHub user profile.
+connection: github
+method: GET
+path: /users/{username}
+params:
+  username:
+    in: path
+    type: string
+    required: true
+```

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Đăng ký — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body class="auth-page">
+<main class="auth-card">
+    <h1>Tạo tài khoản</h1>
+    <p class="muted">Mật khẩu phải có tối thiểu 8 ký tự.</p>
+
+    <form id="registerForm" novalidate>
+        <label>
+            <span>Email</span>
+            <input type="email" name="email" required autocomplete="email" />
+        </label>
+        <label>
+            <span>Mật khẩu</span>
+            <input type="password" name="password" minlength="8" required autocomplete="new-password" />
+        </label>
+        <button type="submit" id="submitBtn">Đăng ký</button>
+    </form>
+
+    <div id="error" class="error" hidden></div>
+
+    <p class="auth-switch">
+        Đã có tài khoản?
+        <a href="/login.html">Đăng nhập</a>
+    </p>
+</main>
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script>
+    AuthPage.bindRegister();
+</script>
+</body>
+</html>

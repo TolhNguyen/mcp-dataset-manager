@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Dashboard — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+    <h1><a href="/dashboard.html">Excel Dataset Manager</a></h1>
+    <div class="topbar-right">
+        <span id="userEmail" class="muted"></span>
+        <button id="logoutBtn" class="btn-link">Đăng xuất</button>
+    </div>
+</header>
+
+<main class="container">
+    <section class="card">
+        <header class="card-head">
+            <h2>Tải lên dataset mới</h2>
+            <div id="quota" class="muted"></div>
+        </header>
+
+        <form id="uploadForm">
+            <label>
+                <span>Tên dataset (tuỳ chọn)</span>
+                <input type="text" name="name" placeholder="Mặc định lấy theo tên file" />
+            </label>
+
+            <label>
+                <span>File (.xlsx, .xls, .xlsm, .csv, .tsv — tối đa 100MB)</span>
+                <input type="file" name="file" accept=".xlsx,.xls,.xlsm,.csv,.tsv" required />
+            </label>
+
+            <button type="submit" id="uploadBtn">Tải lên</button>
+        </form>
+
+        <div id="uploadStatus" class="status-msg" hidden></div>
+    </section>
+
+    <section class="card">
+        <header class="card-head">
+            <h2>Dataset của bạn</h2>
+            <button id="refreshBtn" class="btn-link">Làm mới</button>
+        </header>
+
+        <div id="datasetList" class="dataset-list">
+            <p class="muted">Đang tải…</p>
+        </div>
+    </section>
+</main>
+
+<script src="/js/api.js"></script>
+<script src="/js/auth.js"></script>
+<script src="/js/dashboard.js"></script>
+<script>
+    Dashboard.init();
+</script>
+</body>
+</html>
