@@ -39,6 +39,47 @@
         <div id="uploadStatus" class="status-msg" hidden></div>
     </section>
 
+    <section class="card" id="mcpCard">
+        <header class="card-head">
+            <h2>Kết nối Claude / MCP</h2>
+        </header>
+
+        <p class="muted">
+            Tạo Personal Access Token cho Claude Desktop hoặc Claude Custom Connector.
+            Token chỉ hiển thị một lần, hãy lưu lại như mật khẩu.
+        </p>
+
+        <form id="mcpTokenForm" class="inline-form">
+            <input type="text" name="name" value="claude-desktop" aria-label="Tên token MCP" />
+            <button type="submit" id="createMcpTokenBtn">Tạo token cho Claude</button>
+        </form>
+
+        <div id="mcpStatus" class="status-msg" hidden></div>
+
+        <div id="mcpResult" hidden>
+            <label>
+                <span>Token MCP</span>
+                <textarea id="mcpTokenOutput" class="config-output" rows="2" readonly></textarea>
+            </label>
+
+            <label>
+                <span>Claude Desktop config</span>
+                <textarea id="claudeDesktopConfig" class="config-output" rows="8" readonly></textarea>
+            </label>
+
+            <label>
+                <span>Claude website Custom Connector</span>
+                <textarea id="claudeWebsiteConfig" class="config-output" rows="4" readonly></textarea>
+            </label>
+
+            <div class="dataset-actions">
+                <button type="button" class="btn-link" id="copyMcpTokenBtn">Copy token</button>
+                <button type="button" class="btn-link" id="copyClaudeDesktopBtn">Copy config</button>
+                <button type="button" id="downloadClaudeConfigBtn">Tải claude_desktop_config.json</button>
+            </div>
+        </div>
+    </section>
+
     <section class="card">
         <header class="card-head">
             <h2>Dataset của bạn</h2>
@@ -51,9 +92,9 @@
     </section>
 </main>
 
-<script src="/js/api.js?v=20260527-download2"></script>
-<script src="/js/auth.js?v=20260527-download2"></script>
-<script src="/js/dashboard.js?v=20260527-download2"></script>
+<script src="/js/api.js?v=20260527-mcp-remote"></script>
+<script src="/js/auth.js?v=20260527-mcp-remote"></script>
+<script src="/js/dashboard.js?v=20260527-mcp-stdio"></script>
 <script>
     Dashboard.init();
 </script>

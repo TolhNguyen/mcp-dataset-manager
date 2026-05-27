@@ -7,6 +7,10 @@ const Dashboard = {
 
         $('#refreshBtn').addEventListener('click', () => this.refresh());
         $('#uploadForm').addEventListener('submit', (e) => this.handleUpload(e));
+        $('#mcpTokenForm').addEventListener('submit', (e) => this.handleCreateMcpToken(e));
+        $('#copyMcpTokenBtn').addEventListener('click', () => this.copyText($('#mcpTokenOutput').value, 'Đã copy token.'));
+        $('#copyClaudeDesktopBtn').addEventListener('click', () => this.copyText($('#claudeDesktopConfig').value, 'Đã copy config.'));
+        $('#downloadClaudeConfigBtn').addEventListener('click', () => this.downloadClaudeDesktopConfig());
 
         await this.refresh();
     },
@@ -139,8 +143,112 @@ const Dashboard = {
         } finally {
             button.disabled = false;
         }
+    },
+
+    async handleCreateMcpToken(e) {
+        e.preventDefault();
+        const form = e.currentTarget;
+        const status = $('#mcpStatus');
+        const btn = $('#createMcpTokenBtn');
+        const name = (new FormData(form).get('name') || 'claude-desktop').toString().trim() || 'claude-desktop';
+
+        status.hidden = false;
+        status.className = 'status-msg info';
+        status.textContent = 'Đang tạo token...';
+        btn.disabled = true;
+
+        try {
+            const result = await Api.post('/api/user/api-keys/', { name });
+            const token = result.data?.token;
+            if (!token) throw new Error('API không trả token.');
+
+            const desktopConfig = buildClaudeDesktopConfig(token);
+            const websiteConfig = buildClaudeWebsiteConfig(token);
+
+            $('#mcpTokenOutput').value = token;
+            $('#claudeDesktopConfig').value = JSON.stringify(desktopConfig, null, 2);
+            $('#claudeWebsiteConfig').value = websiteConfig;
+            $('#mcpResult').hidden = false;
+
+            status.className = 'status-msg success';
+            status.textContent = 'Đã tạo token. Token chỉ hiển thị lần này.';
+        } catch (err) {
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Không tạo được token MCP.';
+        } finally {
+            btn.disabled = false;
+        }
+    },
+
+    async copyText(text, message) {
+        const status = $('#mcpStatus');
+        try {
+            await navigator.clipboard.writeText(text);
+            status.hidden = false;
+            status.className = 'status-msg success';
+            status.textContent = message;
+        } catch {
+            status.hidden = false;
+            status.className = 'status-msg error';
+            status.textContent = 'Không copy được. Hãy chọn nội dung và copy thủ công.';
+        }
+    },
+
+    downloadClaudeDesktopConfig() {
+        const content = $('#claudeDesktopConfig').value;
+        if (!content) return;
+
+        const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'claude_desktop_config.json';
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
     }
 };
+
+function buildClaudeDesktopConfig(token) {
+    return {
+        mcpServers: {
+            edm: {
+                command: 'docker',
+                args: [
+                    'exec',
+                    '-i',
+                    '-e',
+                    'MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN}',
+                    'edm-mcp-bridge',
+                    'node',
+                    'dist/index.js',
+                    'stdio'
+                ],
+                env: {
+                    MCP_AUTH_TOKEN: token
+                }
+            }
+        }
+    };
+}
+
+function buildClaudeWebsiteConfig(token) {
+    return [
+        `URL: ${getMcpUrl()}`,
+        'Auth: Bearer token',
+        `Token: ${token}`
+    ].join('\n');
+}
+
+function getMcpUrl() {
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return `http://${window.location.hostname}:5848/mcp`;
+    }
+
+    return `${window.location.origin}/mcp`;
+}
 
 async function downloadFileWithAuth(path, fallbackFileName) {
     if (typeof Api.downloadFile === 'function') {

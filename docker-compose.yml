@@ -59,6 +59,8 @@ services:
       MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-180}
       EDM_API_URL: http://api:8080
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-*}
+    ports:
+      - "${MCP_PORT:-5848}:5848"
     volumes:
       - ./mcp-bridge/tools.md:/app/tools.md:ro
 

@@ -6,12 +6,14 @@
  *
  * Modes:
  *   node dist/index.js                — start HTTP MCP server on /mcp
+ *   node dist/index.js stdio          — start stdio MCP server for Claude Desktop
  *   node dist/index.js validate [cfg] — load + validate config, exit
  */
 
 import express, { type NextFunction, type Request, type Response } from "express";
 import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
@@ -23,7 +25,7 @@ import { loadConfig } from "./config/loader.js";
 import { ConfigParseError } from "./config/parser.js";
 import type { BridgeConfig, ParamDef, ToolDef } from "./config/types.js";
 import { executeTool, log, setLogLevel } from "./http/client.js";
-import { runWithRequestContext } from "./requestContext.js";
+import { runWithRequestContext, type RequestContext } from "./requestContext.js";
 import { watchConfig } from "./watcher.js";
 
 // ============================================================
@@ -96,7 +98,10 @@ function compactToolDescription(tool: ToolDef): string {
   return tool.description.trim();
 }
 
-function createProtocolServer(getBridgeConfig: () => BridgeConfig): Server {
+function createProtocolServer(
+  getBridgeConfig: () => BridgeConfig,
+  getToolCallContext?: () => RequestContext | undefined
+): Server {
   const server = new Server(
     { name: "mcp-bridge", version: "1.1.0" },
     {
@@ -132,7 +137,12 @@ function createProtocolServer(getBridgeConfig: () => BridgeConfig): Server {
       };
     }
 
-    const result = await executeTool(bridgeConfig, tool, args);
+    const callTool = () => executeTool(bridgeConfig, tool, args);
+    const context = getToolCallContext?.();
+    const result = context
+      ? await runWithRequestContext(context, callTool)
+      : await callTool();
+
     return {
       content: [{ type: "text", text: result.text }],
       isError: result.isError,
@@ -151,6 +161,11 @@ async function main() {
 
   if (command === "validate") {
     await runValidate();
+    return;
+  }
+
+  if (command === "stdio") {
+    await runStdioServer();
     return;
   }
 
@@ -362,6 +377,38 @@ async function runHttpServer() {
   process.on("SIGTERM", shutdown);
 }
 
+async function runStdioServer() {
+  const configPath = resolveConfigPath();
+  const bridgeConfig = await loadInitialConfig(configPath);
+  applyLogLevel(bridgeConfig);
+
+  const token = process.env.MCP_AUTH_TOKEN?.trim() ?? "";
+  if (!token.startsWith("edm_pat_")) {
+    console.error("FATAL: MCP_AUTH_TOKEN must be set to an edm_pat_... token for stdio mode.");
+    process.exit(1);
+  }
+
+  const server = createProtocolServer(
+    () => bridgeConfig,
+    () => ({
+      userToken: token,
+      authorization: `Bearer ${token}`,
+      clientIp: "stdio",
+    })
+  );
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+
+  const shutdown = async () => {
+    await safeCloseServer(server);
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
 async function loadInitialConfig(configPath: string): Promise<BridgeConfig> {
   try {
     const result = await loadConfig(configPath);
@@ -492,6 +539,8 @@ function printHelp() {
 Usage:
   mcp-bridge                    Start the HTTP MCP server on /mcp.
                                 Loads $MCP_CONFIG (default: ./tools.md).
+  mcp-bridge stdio              Start a stdio MCP server for Claude Desktop.
+                                Requires MCP_AUTH_TOKEN=edm_pat_...
   mcp-bridge validate [path]    Load and validate the config; exit non-zero if invalid.
   mcp-bridge --help             Show this help.
 
@@ -500,6 +549,7 @@ Environment variables:
   MCP_HOST                    Host to bind. Default: 0.0.0.0.
   MCP_PORT                    Port to bind. Default: 5848.
   MCP_RATE_LIMIT_PER_MINUTE   Per-IP limit for /mcp. Default: 180.
+  MCP_AUTH_TOKEN              PAT used by stdio mode for outbound EDM API calls.
   EDM_API_URL                 Internal EDM API URL, e.g. http://api:8080.
   ...                         Any vars referenced as \${VAR} in the config file.
 
