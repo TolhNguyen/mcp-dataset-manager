@@ -45,39 +45,25 @@
         </header>
 
         <p class="muted">
-            Tạo Personal Access Token cho Claude Desktop hoặc Claude Custom Connector.
-            Token chỉ hiển thị một lần, hãy lưu lại như mật khẩu.
+            Dùng URL dưới đây cho Claude.ai Custom Connector. URL này chứa user id
+            và không cần OAuth, Client ID, Client Secret hay Bearer token.
         </p>
 
-        <form id="mcpTokenForm" class="inline-form">
-            <input type="text" name="name" value="claude-desktop" aria-label="Tên token MCP" />
-            <button type="submit" id="createMcpTokenBtn">Tạo token cho Claude</button>
-        </form>
+        <label>
+            <span>Claude.ai Web Custom Connector URL</span>
+            <input type="text" id="claudeWebConnectorUrl" readonly />
+        </label>
+
+        <p class="muted" style="font-size:13px">
+            Vào Claude.ai Settings → Connectors → Add custom connector, dán URL trên
+            vào Remote MCP server URL.
+        </p>
+
+        <div class="dataset-actions">
+            <button type="button" class="btn-link" id="copyWebUrlBtn">Copy URL</button>
+        </div>
 
         <div id="mcpStatus" class="status-msg" hidden></div>
-
-        <div id="mcpResult" hidden>
-            <label>
-                <span>Token MCP</span>
-                <textarea id="mcpTokenOutput" class="config-output" rows="2" readonly></textarea>
-            </label>
-
-            <label>
-                <span>Claude Desktop config</span>
-                <textarea id="claudeDesktopConfig" class="config-output" rows="8" readonly></textarea>
-            </label>
-
-            <label>
-                <span>Claude website Custom Connector</span>
-                <textarea id="claudeWebsiteConfig" class="config-output" rows="4" readonly></textarea>
-            </label>
-
-            <div class="dataset-actions">
-                <button type="button" class="btn-link" id="copyMcpTokenBtn">Copy token</button>
-                <button type="button" class="btn-link" id="copyClaudeDesktopBtn">Copy config</button>
-                <button type="button" id="downloadClaudeConfigBtn">Tải claude_desktop_config.json</button>
-            </div>
-        </div>
     </section>
 
     <section class="card">
@@ -94,7 +80,7 @@
 
 <script src="/js/api.js?v=20260527-mcp-remote"></script>
 <script src="/js/auth.js?v=20260527-mcp-remote"></script>
-<script src="/js/dashboard.js?v=20260527-mcp-stdio"></script>
+<script src="/js/dashboard.js?v=20260528-user-url"></script>
 <script>
     Dashboard.init();
 </script>

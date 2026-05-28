@@ -5,7 +5,7 @@
  * Remote MCP bridge over Streamable HTTP.
  *
  * Modes:
- *   node dist/index.js                — start HTTP MCP server on /mcp
+ *   node dist/index.js                — start HTTP MCP server on /mcp/{userId}
  *   node dist/index.js stdio          — start stdio MCP server for Claude Desktop
  *   node dist/index.js validate [cfg] — load + validate config, exit
  */
@@ -257,11 +257,10 @@ async function runHttpServer() {
     next();
   });
 
-  app.options("/mcp", (_req, res) => res.status(204).end());
+  app.options("/mcp/:userId", (_req, res) => res.status(204).end());
 
   const rateLimiter = createIpRateLimiter(readIntEnv("MCP_RATE_LIMIT_PER_MINUTE", 180));
   app.use("/mcp", rateLimiter);
-  app.use("/mcp", bearerPatAuth);
 
   app.get("/health", (_req, res) => {
     res.json({
@@ -273,9 +272,17 @@ async function runHttpServer() {
     });
   });
 
-  app.post("/mcp", async (req, res) => {
+  app.all("/mcp", (_req, res) => {
+    jsonRpcError(res, 400, -32000, "Bad Request: use /mcp/{userId}.");
+  });
+
+  app.post("/mcp/:userId", async (req, res) => {
     const sessionId = getSessionId(req);
-    const context = buildRequestContext(req, sessionId);
+    const userId = getUserIdParam(req);
+    if (!userId) {
+      return jsonRpcError(res, 400, -32000, "Bad Request: /mcp/{userId} must include a valid user id.");
+    }
+    const context = buildRequestContext(req, userId, sessionId);
 
     await runWithRequestContext(context, async () => {
       try {
@@ -316,9 +323,13 @@ async function runHttpServer() {
     });
   });
 
-  app.get("/mcp", async (req, res) => {
+  app.get("/mcp/:userId", async (req, res) => {
     const sessionId = getSessionId(req);
-    const context = buildRequestContext(req, sessionId);
+    const userId = getUserIdParam(req);
+    if (!userId) {
+      return jsonRpcError(res, 400, -32000, "Bad Request: /mcp/{userId} must include a valid user id.");
+    }
+    const context = buildRequestContext(req, userId, sessionId);
 
     await runWithRequestContext(context, async () => {
       try {
@@ -333,9 +344,13 @@ async function runHttpServer() {
     });
   });
 
-  app.delete("/mcp", async (req, res) => {
+  app.delete("/mcp/:userId", async (req, res) => {
     const sessionId = getSessionId(req);
-    const context = buildRequestContext(req, sessionId);
+    const userId = getUserIdParam(req);
+    if (!userId) {
+      return jsonRpcError(res, 400, -32000, "Bad Request: /mcp/{userId} must include a valid user id.");
+    }
+    const context = buildRequestContext(req, userId, sessionId);
 
     await runWithRequestContext(context, async () => {
       try {
@@ -353,7 +368,7 @@ async function runHttpServer() {
   const port = readIntEnv("MCP_PORT", 5848);
   const host = process.env.MCP_HOST ?? "0.0.0.0";
   const httpServer = app.listen(port, host, () => {
-    log("info", `mcp-bridge listening on http://${host}:${port}/mcp. Config: ${configPath}`);
+    log("info", `mcp-bridge listening on http://${host}:${port}/mcp/{userId}. Config: ${configPath}`);
   });
 
   const shutdown = async () => {
@@ -433,29 +448,23 @@ function applyLogLevel(config: BridgeConfig) {
   }
 }
 
-function bearerPatAuth(req: Request, res: Response, next: NextFunction) {
-  const token = extractBearerToken(req);
-  if (!token || !token.startsWith("edm_pat_")) {
-    return jsonRpcError(res, 401, -32001, "Unauthorized: Authorization: Bearer edm_pat_... is required.");
-  }
-  next();
-}
-
-function extractBearerToken(req: Request): string | undefined {
-  const authorization = req.header("authorization") ?? "";
-  const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
-  return match?.[1]?.trim();
-}
-
-function buildRequestContext(req: Request, sessionId?: string) {
-  const authorization = req.header("authorization") ?? "";
-  const token = extractBearerToken(req) ?? "";
+function buildRequestContext(req: Request, userId: string, sessionId?: string) {
   return {
-    userToken: token,
-    authorization,
+    userToken: userId,
+    authorization: "",
     clientIp: req.ip,
     sessionId,
   };
+}
+
+function getUserIdParam(req: Request): string | undefined {
+  const userId = req.params.userId?.trim();
+  if (!userId) return undefined;
+  return isGuid(userId) ? userId : undefined;
+}
+
+function isGuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function getSessionId(req: Request): string | undefined {
@@ -537,7 +546,7 @@ function printHelp() {
   console.error(`mcp-bridge — remote Streamable HTTP MCP bridge
 
 Usage:
-  mcp-bridge                    Start the HTTP MCP server on /mcp.
+  mcp-bridge                    Start the HTTP MCP server on /mcp/{userId}.
                                 Loads $MCP_CONFIG (default: ./tools.md).
   mcp-bridge stdio              Start a stdio MCP server for Claude Desktop.
                                 Requires MCP_AUTH_TOKEN=edm_pat_...
@@ -548,13 +557,13 @@ Environment variables:
   MCP_CONFIG                  Path to tools.md or a directory containing *.md files.
   MCP_HOST                    Host to bind. Default: 0.0.0.0.
   MCP_PORT                    Port to bind. Default: 5848.
-  MCP_RATE_LIMIT_PER_MINUTE   Per-IP limit for /mcp. Default: 180.
+  MCP_RATE_LIMIT_PER_MINUTE   Per-IP limit for /mcp/{userId}. Default: 180.
   MCP_AUTH_TOKEN              PAT used by stdio mode for outbound EDM API calls.
   EDM_API_URL                 Internal EDM API URL, e.g. http://api:8080.
   ...                         Any vars referenced as \${VAR} in the config file.
 
 Runtime config variables:
-  \${request.user_token}      PAT from Authorization: Bearer edm_pat_...
+  \${request.user_token}      User id from the /mcp/{userId} URL in HTTP mode.
   \${request.authorization}   Full Authorization header.
   \${request.client_ip}       Client IP as seen by Express.
   \${request.session_id}      MCP session id when present.
