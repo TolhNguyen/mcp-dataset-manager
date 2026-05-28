@@ -5,14 +5,14 @@ App cho phép upload Excel/CSV, chuẩn hoá header tiếng Việt, sinh `manife
 Bản này đã đổi sang mô hình **deploy một lần**:
 
 ```
-Claude.ai / Claude Desktop remote MCP
+Claude.ai Web
         │
-        │  HTTPS /mcp
+        │  HTTPS /mcp/{user_id}
         ▼
 Caddy reverse proxy
-        ├── /mcp  ───────────────► mcp-bridge
+        ├── /mcp/{user_id} ──────► mcp-bridge
         │                              │
-        │                              └── X-API-Key: edm_pat_xxx
+        │                              └── X-API-Key: user_id
         ▼
 Excel Dataset Manager API ───────► PostgreSQL + storage volume
 ```
@@ -23,7 +23,7 @@ Excel Dataset Manager API ───────► PostgreSQL + storage volume
 - `mcp-bridge/`: Node.js MCP bridge chạy **remote HTTP**, không còn stdio/local bridge.
 - `Caddyfile`: reverse proxy HTTPS, tự xin Let's Encrypt cert khi `EDM_DOMAIN` là domain thật.
 - `docker-compose.yml`: chạy PostgreSQL + API + MCP bridge + Caddy bằng một lệnh.
-- Bridge nhận `Authorization: Bearer edm_pat_xxx`, rồi tự forward xuống API bằng `X-API-Key` thông qua `${request.user_token}` trong `tools.md`.
+- Bridge nhận user id trực tiếp trên URL `/mcp/{user_id}`, rồi forward xuống API bằng `X-API-Key: {user_id}` thông qua `${request.user_token}` trong `tools.md`.
 - Rate limit bridge mặc định: `180 req/phút/IP`.
 
 ## Chạy nhanh bằng Docker
@@ -48,7 +48,7 @@ URL mặc định local:
 
 - Web/API qua Caddy: `https://localhost/` hoặc `http://localhost/`
 - API direct: `http://localhost:5847/`
-- MCP endpoint: `https://localhost/mcp`
+- MCP endpoint: `https://localhost/mcp/<user-id>`
 
 Với production, đặt trong `.env`:
 
@@ -87,41 +87,17 @@ excel-dataset-manager/
 └── .env.example
 ```
 
-## Tạo PAT cho Claude
+## Kết nối Claude.ai Web (Custom Connector)
 
-Đăng nhập web app, tạo Personal Access Token từ UI nếu đã có màn hình quản lý key. Hoặc gọi API bằng JWT:
-
-```bash
-curl -s -X POST http://localhost:5847/api/user/api-keys/ \
-  -H "Authorization: Bearer $JWT" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"claude-remote-mcp"}' | jq -r .data.token
-```
-
-Token phải có prefix `edm_pat_`.
-
-## Cấu hình Claude.ai Custom Connector
-
-- URL: `https://<EDM_DOMAIN>/mcp`
-- Auth: Bearer token
-- Token: `edm_pat_xxx`
+1. Đăng nhập dashboard EDM.
+2. Copy **Claude.ai Web Custom Connector URL**. URL có dạng `https://<EDM_DOMAIN>/mcp/<user-id>`.
+3. Vào [Claude.ai](https://claude.ai) → Settings → Connectors → Add custom connector.
+4. Điền:
+   - **Name**: Excel Dataset Manager
+   - **Remote MCP server URL**: URL vừa copy
+5. Nhấn **Add**. Không cần OAuth, Client ID, Client Secret hay Bearer token.
 
 Sau khi kết nối, thử hỏi: “Liệt kê dataset của tôi”.
-
-## Cấu hình Claude Desktop remote MCP
-
-```json
-{
-  "mcpServers": {
-    "edm": {
-      "url": "https://<EDM_DOMAIN>/mcp",
-      "headers": {
-        "Authorization": "Bearer edm_pat_xxx"
-      }
-    }
-  }
-}
-```
 
 ## MCP bridge config
 
@@ -139,7 +115,7 @@ auth:
   value: ${request.user_token}
 ```
 
-`EDM_API_URL` là biến môi trường container (`http://api:8080`). `${request.user_token}` được resolve runtime từ `Authorization: Bearer edm_pat_xxx` của từng request, nên nhiều user có thể dùng chung bridge nhưng mỗi user vẫn dùng PAT riêng.
+`EDM_API_URL` là biến môi trường container (`http://api:8080`). `${request.user_token}` được resolve runtime từ phần `{user_id}` trong URL `/mcp/{user_id}`.
 
 Nếu muốn thêm partner API để đối soát, copy ví dụ trong `mcp-bridge/tools.example.md` vào `tools.md`, set env tương ứng rồi restart bridge:
 
@@ -151,7 +127,8 @@ docker compose restart bridge
 
 | Loại | Prefix | Scope | Dùng cho |
 |---|---|---|---|
-| Personal Access Token | `edm_pat_` | Toàn bộ datasets của user | Claude.ai/Claude Desktop remote MCP |
+| User id shortcut | UUID user | Toàn bộ datasets của user | Claude.ai Web Custom Connector đơn giản |
+| Personal Access Token | `edm_pat_` | Toàn bộ datasets của user | Tích hợp dài hạn có auth |
 | Dataset-scoped key | `edm_` | Một dataset | Share/query giới hạn |
 
 ## Debug
@@ -167,14 +144,14 @@ docker compose logs -f bridge
 docker compose logs -f api
 
 # Kiểm tra bridge health
-curl http://localhost/mcp -i
+curl http://localhost/mcp/<user-id> -i
 curl http://localhost:5847/health
 ```
 
 Các lỗi thường gặp:
 
 - `Jwt:Key must be set...`: chạy `./scripts/deploy.sh` hoặc set `JWT_KEY` trong `.env`.
-- `Unauthorized: Authorization: Bearer edm_pat_... is required`: Claude chưa gửi PAT hoặc token không đúng prefix.
+- `Bad Request: use /mcp/{userId}`: connector đang trỏ vào `/mcp` nhưng thiếu user id ở cuối URL.
 - Caddy không cấp cert: kiểm tra `EDM_DOMAIN` có trỏ DNS về server và port 80/443 đã mở firewall chưa.
 - `.env` đổi password DB nhưng volume cũ vẫn dùng password cũ: `docker compose down -v && docker compose up -d --build`.
 
@@ -187,4 +164,4 @@ export ConnectionStrings__Default="Host=localhost;Port=5432;Database=excel_datas
 dotnet run
 ```
 
-Bridge hiện ưu tiên remote HTTP trong Docker. Không còn cấu hình stdio local cho Claude Desktop.
+Bridge hiện ưu tiên remote HTTP đơn giản cho Claude.ai Web qua URL `/mcp/{user_id}`.

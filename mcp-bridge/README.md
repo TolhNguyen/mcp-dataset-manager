@@ -1,27 +1,27 @@
 # mcp-bridge
 
-Remote MCP bridge cho Excel Dataset Manager. Bridge này expose endpoint Streamable HTTP `/mcp`, dùng được với Claude.ai Custom Connectors và Claude Desktop remote MCP.
+Remote MCP bridge cho Excel Dataset Manager. Bridge này expose endpoint Streamable HTTP `/mcp/{user_id}`, dùng được với Claude.ai Custom Connectors.
 
 Không còn stdio/local mode. Deploy chung với API bằng Docker Compose.
 
 ## Luồng hoạt động
 
 ```text
-Claude.ai / Claude Desktop
-  Authorization: Bearer edm_pat_xxx
+Claude.ai
+  URL: https://<domain>/mcp/<user_id>
           │
           ▼
-POST/GET/DELETE https://<domain>/mcp
+POST/GET/DELETE https://<domain>/mcp/<user_id>
           │
           ▼
 mcp-bridge
-  - validate Bearer token prefix edm_pat_
+  - lấy user_id từ path
   - rate limit theo IP
   - resolve ${request.user_token}
           │
           ▼
 EDM API
-  X-API-Key: edm_pat_xxx
+  X-API-Key: <user_id>
 ```
 
 ## Chạy trong Docker Compose
@@ -60,8 +60,8 @@ Các biến `${VAR}` được resolve khi bridge load config từ env.
 
 Các biến `${request.*}` được resolve runtime theo từng request HTTP:
 
-- `${request.user_token}`: phần token trong `Authorization: Bearer edm_pat_xxx`
-- `${request.authorization}`: nguyên header Authorization
+- `${request.user_token}`: user id trong URL `/mcp/{user_id}`
+- `${request.authorization}`: rỗng trong flow không-auth này
 - `${request.client_ip}`: IP client sau proxy
 - `${request.session_id}`: MCP session id nếu request có
 
@@ -87,24 +87,8 @@ MCP_RATE_LIMIT_PER_MINUTE=180
 
 ## Claude.ai Custom Connector
 
-- URL: `https://<domain>/mcp`
-- Auth: Bearer token
-- Token: `edm_pat_xxx`
-
-## Claude Desktop remote MCP
-
-```json
-{
-  "mcpServers": {
-    "edm": {
-      "url": "https://<domain>/mcp",
-      "headers": {
-        "Authorization": "Bearer edm_pat_xxx"
-      }
-    }
-  }
-}
-```
+- URL: `https://<domain>/mcp/<user_id>`
+- Auth: không cần OAuth, Client ID, Client Secret hay Bearer token
 
 ## Thêm tool / partner API
 
