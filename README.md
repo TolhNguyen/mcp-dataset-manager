@@ -1,85 +1,529 @@
 # Excel Dataset Manager
 
-**Upload Excel or CSV files. Query them with SQL. Let Claude analyze your data — no code required.**
+**Token-controlled spreadsheet analytics for AI agents.**
 
-Excel Dataset Manager (EDM) is a self-hosted platform that turns spreadsheets into queryable datasets accessible to AI agents via the Model Context Protocol (MCP). Upload a file, and within seconds Claude can write SQL against it, interpret Vietnamese column names, and return structured results — all without exposing your raw data or credentials.
+Excel Dataset Manager (EDM) is a self-hosted platform that turns Excel/CSV files into queryable datasets for AI agents. Instead of pushing an entire spreadsheet into a chat context, EDM stores the raw file on your server, parses it into metadata + Parquet, and lets the agent ask focused SQL questions through MCP/API.
+
+> **Core positioning**
+>
+> EDM is not a zero-token data reader. EDM is a **token-controlled query layer** for AI.
+>
+> Token usage does not disappear. It shifts from “read the entire raw file” to “read only the relevant schema, SQL, and query result.”
 
 ---
 
 ## Why EDM?
 
-Most "AI + spreadsheet" workflows require you to paste data into a chat window, hand it to a third-party service, or write custom glue code. EDM takes a different approach:
+Most AI + spreadsheet workflows require one of these approaches:
 
-- **Your data stays on your server.** Files are stored locally and queried in-process by DuckDB. Nothing leaves your infrastructure.
-- **One URL to connect Claude.** No OAuth dance, no API tokens to copy-paste. Claude.ai connects to `/mcp/{your-user-id}` and gets instant access to all your datasets.
-- **Vietnamese-first column normalization.** Headers like `Doanh thu tháng 3` become `doanh_thu_thang_3` automatically. Accents removed, symbols mapped, SQL keywords escaped. Claude works with the normalized names while you see the originals.
-- **SQL errors are self-healing.** When Claude typos a column name, the response includes ranked suggestions (`revenue` instead of `revanue`) so Claude can self-correct without a round trip to you.
-- **Zero-downtime file parsing.** Uploads return immediately. Parsing, Parquet conversion, and manifest generation happen in a background worker — you can query the moment status flips to `ready`.
+1. Upload the entire file directly into a chat.
+2. Paste raw rows into the prompt.
+3. Ask the model to infer everything from a large context window.
+4. Build custom glue code for every dataset.
 
----
+That works for small files, but becomes expensive and unstable when:
 
-## Architecture
+- row count grows;
+- table count grows;
+- questions become more complex;
+- the chat session contains many previous query results;
+- the answer only needs 100–200 rows but the model still receives the entire file.
 
-```
-Claude.ai Web
-      │
-      │  HTTPS  /mcp/{user_id}
-      ▼
-Caddy (TLS termination + reverse proxy)
-      ├── /mcp/*  ──► mcp-bridge  (Node.js, Streamable HTTP MCP)
-      │                    │
-      │                    └── X-API-Key: {user_id}
-      ▼
-EDM API  (ASP.NET Core 8)
-      ├── Auth       JWT + API keys (user-scoped PATs + dataset-scoped keys)
-      ├── Upload     multipart → advisory-locked INSERT → background queue
-      ├── Parser     Excel/CSV → normalized CSV → Parquet (DuckDB COPY/zstd)
-      ├── Manifest   manifest.md: schema, aliases, NL query guide
-      └── Query      DuckDB in-memory, CREATE VIEW per table, LIMIT enforcement
-            │
-            ▼
-     PostgreSQL  (metadata, users, query logs, API keys)
-     Storage volume  (.parquet files + originals + manifests)
-```
+EDM takes a different approach:
 
-### Data pipeline
-
-Every uploaded file goes through the same pipeline:
-
-1. **Parse** — `ExcelDataReader` (xlsx/xls/xlsm) or a streaming CSV parser handles the raw file row-by-row.
-2. **Normalize** — `HeaderNormalizer` strips Vietnamese diacritics, maps symbols (`%` → `pct`, `₫` → `vnd`), deduplicates column names, and escapes SQL keywords.
-3. **Type inference** — `ColumnStats` accumulates per-column counts for number-like, date-like, and boolean-like values (capped at 5 000 rows). `TypeInferrer.Reduce` emits `number_candidate`, `date_candidate`, `boolean_candidate`, or `string`.
-4. **Parquet** — DuckDB `COPY … TO … (FORMAT 'parquet', COMPRESSION 'zstd')` converts the intermediate CSV to Parquet with full-file type inference.
-5. **Manifest** — `ManifestGenerator` writes `manifest.md`: table schemas, column mapping tables, Vietnamese aliases, and a natural-language query guide.
-
-### Query safety
-
-Every SQL query goes through `QueryValidator` before DuckDB sees it:
-
-- Strips string literals and comments before scanning, avoiding false positives on user text.
-- Rejects multiple statements (`;` not at end).
-- Requires `SELECT` or `WITH` as the first token.
-- Blocks a hard list of forbidden tokens: `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `TRUNCATE`, `ATTACH`, `DETACH`, `COPY`, `read_parquet`, `read_csv`, `httpfs`, `INSTALL`, `LOAD`, `SET`.
-- Wraps the query in `SELECT * FROM (...) AS _user_query LIMIT N` unless a top-level `LIMIT` already exists.
-
-Each query runs in a fresh in-memory DuckDB connection with `memory_limit` and `statement_timeout` applied.
+- **Raw data stays outside the model context.**
+- **Files are parsed once, then queried many times.**
+- **DuckDB reads Parquet locally.**
+- **The AI receives only schema/manifest, SQL, and compact query results.**
+- **Result size is controlled by `max_rows`, hard caps, pagination, and summary policies.**
 
 ---
 
-## Features
+## Current implementation summary
 
-| Feature | Detail |
+```mermaid
+flowchart TD
+    U[User / Claude / Agent] --> M[MCP Bridge or API]
+    M --> A[ASP.NET Core API]
+    A --> AUTH[JWT / API Key Auth]
+    A --> UPLOAD[Dataset Upload]
+    UPLOAD --> Q[Background Parsing Queue]
+    Q --> PARSE[Excel / CSV Parser]
+    PARSE --> NORM[Header Normalization]
+    NORM --> STATS[Column Stats + Type Inference]
+    STATS --> PQ[Parquet Writer]
+    PQ --> MANIFEST[manifest.md]
+    MANIFEST --> PG[(PostgreSQL Metadata)]
+    PQ --> STORAGE[(Storage Volume)]
+
+    U --> QUERY[Query Request]
+    QUERY --> VALIDATE[QueryValidator Read-only SQL]
+    VALIDATE --> DUCK[DuckDB In-memory Query]
+    DUCK --> RESULT[compact_table JSON Result]
+    RESULT --> U
+```
+
+### Main source areas
+
+| Area | Source path |
 |---|---|
-| **File formats** | `.xlsx`, `.xls`, `.xlsm`, `.csv`, `.tsv` — up to 100 MB by default |
-| **Multi-sheet Excel** | Each sheet becomes a separate queryable table |
-| **Async parsing** | Upload returns instantly; background worker handles the rest |
-| **Parquet storage** | zstd-compressed, read by DuckDB at query time |
-| **Column suggestions** | On `COLUMN_NOT_FOUND`, server returns ranked fuzzy-matched alternatives |
-| **Dataset limit** | 10 datasets per user, enforced with a PostgreSQL advisory lock |
-| **Auth** | JWT (7-day) + user PATs (`edm_pat_…`) + dataset-scoped keys (`edm_…`) |
-| **Rate limiting** | 10 req/min on auth endpoints; 60 req/min per IP on query |
-| **MCP bridge** | Streamable HTTP, hot-reload config, per-IP rate limiting |
-| **HTTPS** | Caddy auto-provisions Let's Encrypt certificates |
+| API | `api/` |
+| Dataset upload/list/detail | `api/Services/DatasetService.cs` |
+| Background parsing | `api/BackgroundJobs/ParsingHostedService.cs` |
+| File parsing | `api/Services/FileParserService.cs` |
+| Header normalization | `api/Services/HeaderNormalizer.cs` |
+| Manifest generation | `api/Services/ManifestGenerator.cs` |
+| Parquet conversion | `api/Services/ParquetWriter.cs` |
+| SQL validation | `api/Services/QueryValidator.cs` |
+| Query execution | `api/Services/DuckDbQueryService.cs` |
+| MCP bridge | `mcp-bridge/` |
+| Deployment | `docker-compose.yml`, `Caddyfile`, `scripts/deploy.sh` |
+
+---
+
+## Token efficiency model
+
+EDM should be evaluated with this formula:
+
+```text
+Direct upload token
+≈ raw_file_tokens × number_of_questions_or_context_reloads
+```
+
+```text
+EDM token per question
+≈ relevant_schema_tokens
+ + business_question_tokens
+ + generated_sql_tokens
+ + query_result_tokens
+ + retained_chat_history_tokens
+```
+
+The most important point:
+
+> EDM does not make token usage constant. EDM makes token usage depend on the **data actually needed for the answer**, instead of the **entire file size**.
+
+---
+
+## What consumes tokens?
+
+| Component | Direct upload workflow | EDM workflow |
+|---|---:|---:|
+| Raw file rows | Very high | Usually not sent to model |
+| Full schema | Often hidden inside raw file | Sent as manifest/schema, should be filtered |
+| User question | Yes | Yes |
+| SQL / reasoning | Sometimes implicit | Yes |
+| Query result | Yes | Yes |
+| Previous chat results | Yes | Yes |
+| Session history | Yes | Yes |
+
+The system is efficient only when it controls:
+
+- how much schema is sent;
+- how many rows are returned;
+- how many columns are returned;
+- how much previous result data is kept in the chat context.
+
+---
+
+# Benchmark scenarios
+
+The following benchmark numbers are **simulation estimates**, not lab measurements.
+
+They are designed to explain token behavior and product direction. Real token usage depends on:
+
+- model tokenizer;
+- average cell length;
+- number of columns;
+- SQL complexity;
+- response format;
+- whether previous results are kept or summarized;
+- whether the AI receives full manifest or only relevant schema.
+
+All charts use a **relative token index** from `0` to `100`, where:
+
+- `100` means very high token pressure;
+- lower is better;
+- the values show direction and risk, not exact token counts.
+
+---
+
+## Scenario A — Few tables, row count grows
+
+### Test shape
+
+| Variable | Assumption |
+|---|---:|
+| Number of tables | 1–2 |
+| Average columns | 15–25 |
+| Row count | Increasing |
+| Question complexity | Medium to high |
+| Query result size | 100–200 rows |
+| Main risk | Raw file grows very large |
+
+### Expected behavior
+
+When the number of rows grows but the query still returns only 100–200 rows, EDM is strongest.
+
+The direct upload approach becomes expensive because the model must read a larger raw file. EDM stays controlled because the model receives only schema + SQL + limited result.
+
+```mermaid
+xychart-beta
+    title "Scenario A - Row count growth, result limited to 100-200 rows"
+    x-axis ["1K rows", "10K rows", "30K rows", "100K rows", "1M rows"]
+    y-axis "Relative token index" 0 --> 100
+    line "Raw upload" [10, 45, 75, 100, 100]
+    line "EDM query result" [8, 9, 10, 12, 15]
+    line "EDM + summary" [6, 6, 7, 8, 9]
+```
+
+### Fallback table
+
+| Dataset size | Raw upload | EDM query result 100–200 rows | EDM + summary |
+|---:|---:|---:|---:|
+| 1K rows | 10 | 8 | 6 |
+| 10K rows | 45 | 9 | 6 |
+| 30K rows | 75 | 10 | 7 |
+| 100K rows | 100 | 12 | 8 |
+| 1M rows | 100 | 15 | 9 |
+
+### README claim
+
+Good claim:
+
+> When row count grows but the result set is limited, EDM prevents token usage from growing with the full raw file.
+
+Bad claim:
+
+> EDM token usage is fixed even when data grows.
+
+---
+
+## Scenario B — Many tables, small data per table
+
+### Test shape
+
+| Variable | Assumption |
+|---|---:|
+| Rows per table | 200–300 |
+| Number of tables | Increasing |
+| Question complexity | Medium to high |
+| Query result size | 100–200 rows |
+| Main risk | Schema/manifest becomes large |
+
+### Expected behavior
+
+This case is different from Scenario A.
+
+Even if each table has few rows, a dataset with 200–300 tables can still be expensive if the agent receives the full manifest every time.
+
+In this case, the main token risk shifts from **row data** to **schema size**.
+
+```mermaid
+xychart-beta
+    title "Scenario B - Table count growth, 200-300 rows per table"
+    x-axis ["5 tables", "20 tables", "50 tables", "100 tables", "300 tables"]
+    y-axis "Relative token index" 0 --> 100
+    line "Raw upload" [15, 45, 75, 95, 100]
+    line "EDM full manifest" [10, 25, 45, 70, 95]
+    line "EDM relevant schema only" [8, 10, 12, 15, 22]
+```
+
+### Fallback table
+
+| Number of tables | Raw upload | EDM full manifest | EDM relevant schema only |
+|---:|---:|---:|---:|
+| 5 | 15 | 10 | 8 |
+| 20 | 45 | 25 | 10 |
+| 50 | 75 | 45 | 12 |
+| 100 | 95 | 70 | 15 |
+| 300 | 100 | 95 | 22 |
+
+### README claim
+
+Good claim:
+
+> For many-table datasets, EDM must retrieve only relevant tables and columns before asking the model to generate SQL.
+
+Bad claim:
+
+> EDM always stays cheap when tables increase.
+
+### Recommended improvement
+
+For this scenario, EDM should add a **schema retrieval step**:
+
+```text
+User question
+→ identify likely dataset/table names
+→ retrieve only relevant table schemas
+→ generate SQL
+→ execute query
+→ return compact result
+```
+
+---
+
+## Scenario C — Medium dataset, questions in one chat session grow
+
+### Test shape
+
+| Variable | Assumption |
+|---|---:|
+| Number of tables | 5–10 |
+| Total rows | 20K–30K |
+| Question complexity | Medium to high |
+| Query result size | 100–200 rows per question |
+| Main risk | Previous query results accumulate in chat history |
+
+### Expected behavior
+
+EDM still saves token compared with direct raw upload. However, token usage grows if every query result is kept in the chat history.
+
+For long sessions, EDM should summarize previous results and avoid keeping every 100–200-row response in full.
+
+```mermaid
+xychart-beta
+    title "Scenario C - Chat session growth, each query returns 100-200 rows"
+    x-axis ["1 question", "3 questions", "5 questions", "10 questions", "20 questions"]
+    y-axis "Relative token index" 0 --> 100
+    line "Raw upload in context" [80, 90, 95, 100, 100]
+    line "EDM keeping full results" [10, 25, 40, 70, 100]
+    line "EDM with result summaries" [8, 12, 16, 25, 40]
+```
+
+### Fallback table
+
+| Questions in session | Raw upload in context | EDM keeping full results | EDM with result summaries |
+|---:|---:|---:|---:|
+| 1 | 80 | 10 | 8 |
+| 3 | 90 | 25 | 12 |
+| 5 | 95 | 40 | 16 |
+| 10 | 100 | 70 | 25 |
+| 20 | 100 | 100 | 40 |
+
+### README claim
+
+Good claim:
+
+> In long chat sessions, EDM should summarize previous query results. Otherwise, token usage still grows with the number of returned rows kept in context.
+
+Bad claim:
+
+> Once the data is inside EDM, every follow-up question is always cheap.
+
+---
+
+# Optimized token-control design
+
+This is the recommended operating model for EDM.
+
+It combines all three scenarios:
+
+1. Do not send raw files to the model.
+2. Do not send full manifest when table count is large.
+3. Do not keep full query results forever in the chat context.
+4. Always cap result rows.
+5. Use summary mode for large or repeated results.
+
+```mermaid
+flowchart LR
+    Q[User asks business question] --> CLASSIFY[Classify intent and target dataset]
+    CLASSIFY --> SCHEMA{How many tables?}
+
+    SCHEMA -->|Few tables| SMALL_SCHEMA[Send compact manifest]
+    SCHEMA -->|Many tables| RETRIEVE[Retrieve only relevant tables and columns]
+
+    SMALL_SCHEMA --> SQL[Generate read-only SQL]
+    RETRIEVE --> SQL
+
+    SQL --> VALIDATE[Validate SQL: SELECT/WITH only]
+    VALIDATE --> EXEC[Execute in DuckDB over Parquet]
+    EXEC --> SIZE{Result size}
+
+    SIZE -->|Small result| RETURN[Return compact_table]
+    SIZE -->|100-200 rows| LIMITED[Return limited compact_table + row_count]
+    SIZE -->|Large result| SUMMARY[Return summary + sample rows + estimated token cost]
+
+    RETURN --> MEMORY[Keep answer summary in chat]
+    LIMITED --> MEMORY
+    SUMMARY --> MEMORY
+
+    MEMORY --> NEXT[Next question uses summary, not full previous rows]
+```
+
+## Optimized policy matrix
+
+| Risk | Control policy |
+|---|---|
+| Row count grows | Keep raw data in Parquet; query only needed rows |
+| Table count grows | Retrieve relevant schema only |
+| Query returns too many rows | Enforce `max_rows`, hard cap, pagination |
+| Result has many columns | Ask model to select needed columns only |
+| Session has many questions | Summarize old results |
+| User asks broad exploratory question | Return profile/summary first, not full rows |
+| SQL is too complex | Validate query, expose executed SQL, log query |
+| Column mismatch | Suggest closest columns |
+
+---
+
+## Recommended token modes
+
+EDM should support these response modes:
+
+| Mode | Use case | Response |
+|---|---|---|
+| `compact_table` | Normal query result | Columns + rows, capped by `max_rows` |
+| `summary` | Large result or broad question | Row count, column count, sample rows, key stats |
+| `profile` | Initial dataset exploration | Schema, table list, column stats |
+| `schema_only` | SQL generation planning | Relevant table and column metadata |
+| `paged_result` | User explicitly wants rows | Page cursor + limited rows |
+| `explain_query` | Debugging | Submitted SQL + executed SQL + validation notes |
+
+---
+
+## Proposed response decision rule
+
+```mermaid
+flowchart TD
+    R[Query result ready] --> COUNT{Rows returned}
+    COUNT -->|0-50| A[Return full compact_table]
+    COUNT -->|51-200| B[Return compact_table + warning]
+    COUNT -->|201-1000| C[Return first page + summary + next_cursor]
+    COUNT -->|>1000| D[Return summary mode only]
+
+    B --> W1[Show estimated token cost]
+    C --> W2[Ask user to narrow columns/filter]
+    D --> W3[Require pagination or aggregation]
+```
+
+---
+
+## Example user flow
+
+```text
+User: Tổng hợp doanh thu theo tháng và chỉ ra tháng bất thường.
+
+EDM flow:
+1. Send relevant schema only.
+2. Generate SQL:
+   SELECT month, SUM(revenue) AS revenue
+   FROM orders
+   GROUP BY month
+   ORDER BY month;
+3. Execute in DuckDB.
+4. Return 12 rows.
+5. Model analyzes only 12 rows, not the full file.
+```
+
+Better than:
+
+```text
+Upload entire Excel file
+→ model reads all rows
+→ model tries to reason over raw cells
+→ repeated questions keep reusing heavy context
+```
+
+---
+
+## Query safety
+
+Every SQL query should be read-only and controlled.
+
+Current design principles:
+
+- Accept only `SELECT` / `WITH`.
+- Reject write operations such as `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`.
+- Apply row limits.
+- Run query in DuckDB over Parquet.
+- Return structured JSON response.
+- Log submitted SQL, executed SQL, elapsed time, row count, and error code.
+
+---
+
+## Storage model
+
+```mermaid
+flowchart TD
+    FILE[Uploaded Excel/CSV] --> ORIGINAL[Store original file]
+    FILE --> PARSER[Streaming parser]
+    PARSER --> CSV[Temporary normalized CSV]
+    CSV --> PARQUET[Parquet files]
+    PARSER --> META[Table and column metadata]
+    META --> MANIFEST[manifest.md]
+    PARQUET --> QUERY[DuckDB query layer]
+    MANIFEST --> AI[AI schema context]
+    QUERY --> RESULT[Limited query result]
+    RESULT --> AI
+```
+
+---
+
+## Data pipeline
+
+1. **Upload**
+   - Validate extension and file size.
+   - Create dataset record.
+   - Save original file.
+   - Enqueue parsing job.
+
+2. **Parse**
+   - Read Excel/CSV.
+   - Normalize headers.
+   - Infer types.
+   - Collect sample values and column stats.
+
+3. **Store**
+   - Convert normalized data to Parquet.
+   - Save metadata in PostgreSQL.
+   - Generate `manifest.md`.
+
+4. **Query**
+   - Validate SQL.
+   - Create DuckDB views over Parquet.
+   - Execute read-only query.
+   - Return compact result.
+
+5. **AI analysis**
+   - AI reads only schema + result.
+   - AI does not need the raw file unless explicitly requested.
+
+---
+
+## Token benchmark interpretation
+
+### What EDM is good at
+
+| Case | EDM fit |
+|---|---|
+| Large row count, small answer | Excellent |
+| Aggregation questions | Excellent |
+| Top-N reports | Excellent |
+| Repeated analytical questions | Good if summaries are used |
+| Many tables | Good only with relevant schema retrieval |
+| Full data export | Not a token-saving use case |
+
+### What EDM is not good at
+
+| Case | Reason |
+|---|---|
+| Returning all rows to the model | Result tokens become large |
+| Sending full schema for 300 tables every time | Schema tokens become large |
+| Keeping every result in chat history | Session tokens grow |
+| Asking vague questions without narrowing | Model may need too much schema/data |
+
+---
+
+## Recommended README claim
+
+Use this:
+
+> EDM reduces AI token usage by keeping raw spreadsheet data outside the model context and exposing a controlled SQL query layer. Token usage mainly depends on relevant schema, question complexity, generated SQL, and the size of the query result. For aggregate or limited-result questions, EDM avoids token growth from the full dataset size.
+
+Avoid this:
+
+> EDM makes large data analysis almost free in tokens.
 
 ---
 
@@ -90,158 +534,116 @@ git clone https://github.com/yourname/excel-dataset-manager
 cd excel-dataset-manager
 
 cp .env.example .env
-# Edit .env: set POSTGRES_PASSWORD and EDM_DOMAIN (your real domain, or leave as localhost)
-# JWT_KEY can be left blank — the deploy script will generate one
+# Edit .env: set POSTGRES_PASSWORD, JWT_KEY, EDM_DOMAIN, and other deployment values.
 
-./scripts/deploy.sh
+docker compose up -d --build
 ```
 
-That's it. Four containers start: PostgreSQL, the API, the MCP bridge, and Caddy.
+Default services:
 
-| Endpoint | URL |
+| Service | Purpose |
 |---|---|
-| Web dashboard | `https://localhost/` |
-| API direct | `http://localhost:5847/` |
-| MCP (for Claude) | `https://localhost/mcp/{user-id}` |
-
-For a public deployment, point DNS at your server and set `EDM_DOMAIN=your.domain.com` in `.env`. Caddy handles TLS automatically.
-
----
-
-## Connect Claude.ai in 30 seconds
-
-1. Log in to the EDM dashboard and copy your **Claude.ai Web Custom Connector URL** — it looks like `https://your.domain.com/mcp/{your-user-id}`.
-2. In Claude.ai: **Settings → Connectors → Add custom connector**.
-3. Paste the URL. No OAuth, no Client ID, no Client Secret, no Bearer token needed.
-4. Ask Claude: *"List my datasets."*
-
-The MCP bridge passes your user ID from the URL path directly to the API as an `X-API-Key` header, so Claude gets access to all your datasets with zero credential management.
+| PostgreSQL | Metadata, users, API keys, query logs |
+| EDM API | Upload, parse, query, auth |
+| MCP bridge | Connect Claude/agents to EDM |
+| Caddy | HTTPS reverse proxy |
 
 ---
 
-## API key types
+## Example API query
 
-| Type | Prefix | Scope | Best for |
-|---|---|---|---|
-| User ID shortcut | UUID | All your datasets | Claude.ai Web Connector |
-| Personal Access Token | `edm_pat_…` | All your datasets | Long-lived integrations, stdio MCP |
-| Dataset-scoped key | `edm_…` | One specific dataset | Sharing a single dataset externally |
-
-PATs and dataset keys are stored as SHA-256 hashes — the raw value is shown once at creation.
-
----
-
-## MCP bridge tool config
-
-The bridge is driven by a Markdown file (`mcp-bridge/tools.md`). Each fenced ` ```yaml ` block declares a connection or a tool. The default config ships with six EDM tools:
-
-| Tool | What it does |
-|---|---|
-| `list_datasets` | List all uploaded datasets with status and row counts |
-| `get_dataset_schema` | Fetch `manifest.md` — column names, types, aliases, SQL guide |
-| `query_dataset` | Run a `SELECT` / `WITH` query, get back a compact column+rows table |
-| `get_dataset` | Poll a single dataset's status (use after `upload_dataset`) |
-| `upload_dataset` | Upload a file from the bridge container's filesystem |
-| `delete_dataset` | Permanently delete a dataset (requires explicit user confirmation) |
-
-To add a partner API for data reconciliation, add a `connection` block and `tool` blocks to `tools.md`, then restart the bridge:
-
-```bash
-docker compose restart bridge
+```http
+POST /api/datasets/{dataset_id}/query
+Content-Type: application/json
+Authorization: Bearer <token>
 ```
 
-The bridge hot-reloads config on file changes. If the new config has a validation error, the previous valid config keeps serving traffic.
-
----
-
-## Local development
-
-```bash
-# Start only PostgreSQL
-docker compose up -d postgres
-
-# Run the API locally
-cd api
-dotnet restore
-export ConnectionStrings__Default="Host=localhost;Port=5432;Database=excel_dataset_manager;Username=app;Password=app_password"
-export Jwt__Key="dev_only_secret_key_change_for_production_minimum_32_chars"
-dotnet run
+```json
+{
+  "queryType": "sql",
+  "sql": "SELECT month, SUM(revenue) AS revenue FROM orders GROUP BY month ORDER BY month",
+  "options": {
+    "maxRows": 200,
+    "returnFormat": "compact_table"
+  }
+}
 ```
 
-```bash
-# Run the MCP bridge locally
-cd mcp-bridge
-npm install
-npm run build
-EDM_API_URL=http://localhost:8080 node dist/index.js
-```
+Expected response shape:
 
-Validate your tools.md config without starting the server:
-
-```bash
-node dist/index.js validate ./tools.md
+```json
+{
+  "success": true,
+  "status": "completed",
+  "result": {
+    "format": "compact_table",
+    "columns": [
+      { "name": "month", "type": "VARCHAR" },
+      { "name": "revenue", "type": "DOUBLE" }
+    ],
+    "rows": [
+      ["2026-01", 120000000],
+      ["2026-02", 132000000]
+    ],
+    "row_count": 2,
+    "truncated": false
+  },
+  "execution": {
+    "engine": "duckdb",
+    "max_rows": 200
+  }
+}
 ```
 
 ---
 
-## Debugging
+## Roadmap for stronger token efficiency
 
-```bash
-# All containers
-docker compose logs --tail 200
-
-# Follow bridge logs
-docker compose logs -f bridge
-
-# Follow API logs
-docker compose logs -f api
-
-# Health checks
-curl http://localhost:5847/health
-curl http://localhost:5848/health
-```
-
-**Common issues:**
-
-| Symptom | Fix |
-|---|---|
-| `Jwt:Key must be set…` at startup | Run `./scripts/deploy.sh` or set `JWT_KEY` (≥ 32 chars) in `.env` |
-| `Bad Request: use /mcp/{userId}` | Connector URL is missing the user ID at the end |
-| Caddy not issuing TLS cert | Check DNS points to your server and ports 80/443 are open |
-| Dataset stuck at `processing` after restart | The in-memory job queue doesn't survive restarts; the API re-enqueues orphaned jobs on boot |
-| DB won't accept new password after `.env` change | `docker compose down -v && docker compose up -d --build` |
+| Priority | Improvement | Why |
+|---:|---|---|
+| P0 | Enforce output token budget | Prevent large responses from flooding the model |
+| P0 | Summary mode for large query results | Keep long sessions light |
+| P1 | Relevant schema retrieval | Required for 100–300 table datasets |
+| P1 | Query result pagination | Safer for row-level inspection |
+| P1 | Column pruning suggestion | Avoid `SELECT *` |
+| P2 | Token estimation before returning result | Show estimated cost before large output |
+| P2 | Session memory compression | Summarize previous answers/results |
+| P2 | Benchmark script with tokenizer | Replace simulation with real measured data |
 
 ---
 
-## Project layout
+## How to benchmark with real data later
 
-```
-excel-dataset-manager/
-├── api/                          # ASP.NET Core 8 backend
-│   ├── Program.cs                # Minimal API endpoints, DI, middleware
-│   ├── Auth/                     # JWT + API key authentication handlers
-│   ├── BackgroundJobs/           # Channel-based parsing queue + hosted service
-│   ├── Services/                 # Business logic: parse, store, query, manifest
-│   ├── Models/                   # DTOs, error codes, domain records
-│   └── wwwroot/                  # Vanilla JS + HTML dashboard
-├── mcp-bridge/                   # Node.js Streamable HTTP MCP bridge
-│   ├── src/
-│   │   ├── index.ts              # Express server, MCP session management
-│   │   ├── config/               # Markdown config loader, YAML parser, Zod validator
-│   │   ├── http/                 # Tool executor, template engine, auth strategies
-│   │   └── response/             # JSONPath transform
-│   ├── tools.md                  # Production EDM tool declarations
-│   └── tools.example.md          # Example with partner API patterns
-├── docs/
-│   ├── API.md                    # Full REST API reference
-│   └── ARCHITECTURE.md           # Deep-dive: pipeline, query safety, type inference
-├── Caddyfile                     # HTTPS reverse proxy config
-├── docker-compose.yml
-└── .env.example
-```
+To turn the simulation into real numbers:
+
+1. Prepare 3 benchmark datasets:
+   - 1–2 tables with increasing rows.
+   - 200–300 small tables.
+   - 5–10 tables with 20K–30K rows.
+
+2. Prepare a fixed question set:
+   - simple aggregate;
+   - complex filter/grouping;
+   - top-N query;
+   - join query;
+   - follow-up question.
+
+3. Measure:
+   - raw file token count;
+   - manifest token count;
+   - relevant schema token count;
+   - SQL token count;
+   - result token count;
+   - cumulative session token count.
+
+4. Compare:
+   - direct upload;
+   - EDM with full manifest;
+   - EDM with relevant schema only;
+   - EDM with summaries.
 
 ---
 
-## License
+## Final product message
 
-MIT
+> Excel Dataset Manager helps AI agents analyze spreadsheet data without loading the entire file into the model context. It stores data locally, converts it to queryable Parquet, exposes a safe SQL layer, and returns compact results. This makes token usage controlled, explainable, and scalable for real analytical workflows.
