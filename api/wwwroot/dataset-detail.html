@@ -22,6 +22,46 @@
         <p class="muted">Đang tải dataset…</p>
     </section>
 
+    <section class="card" id="businessKnowledgeCard" hidden>
+        <header class="card-head">
+            <div>
+                <h2>Gợi ý dữ liệu</h2>
+                <p class="muted">
+                    Nhập các quy ước, công thức, định nghĩa hoặc lưu ý nghiệp vụ để Claude tham khảo khi phân tích dữ liệu.
+                    Nội dung này chỉ là tham khảo, không phải nguồn sự thật tuyệt đối.
+                </p>
+            </div>
+        </header>
+        <textarea id="businessKnowledgeInput" rows="8" maxlength="10000" placeholder="Ví dụ:
+- Chỉ tính doanh thu với đơn có status = Completed.
+- Đơn Cancelled / Failed không tính vào doanh thu.
+- Cột revenue là doanh thu sau giảm giá, chưa trừ phí sàn.
+- Cột order_code là mã đơn hàng.
+- Cột store_code là mã cửa hàng giao đi.
+- Nếu hỏi doanh thu theo ngày thì dùng cột created_at."></textarea>
+        <div class="chip-row" id="businessKnowledgeChips">
+            <button type="button" class="chip" data-template="Quy ước tính doanh thu:
+- Chỉ tính các dòng có ...
+- Không tính các dòng có ...
+- Cột doanh thu chính là ...">Thêm quy ước tính doanh thu</button>
+            <button type="button" class="chip" data-template="Ý nghĩa trạng thái đơn:
+- Completed: ...
+- Cancelled: ...
+- Failed: ...">Giải thích trạng thái đơn</button>
+            <button type="button" class="chip" data-template="Cột ngày chính:
+- Khi phân tích theo ngày, dùng cột ...
+- Múi giờ / quy ước ngày: ...">Chỉ định cột ngày chính</button>
+            <button type="button" class="chip" data-template="Dòng không nên tính:
+- Loại trừ các dòng có ...
+- Lý do: ...">Ghi chú dòng loại trừ</button>
+        </div>
+        <div class="form-row business-knowledge-actions">
+            <button id="saveBusinessKnowledgeBtn" type="button">Lưu</button>
+            <span id="businessKnowledgeSavedAt" class="muted"></span>
+        </div>
+        <div id="businessKnowledgeStatus" class="status-msg" hidden></div>
+    </section>
+
     <section class="card" id="tablesCard" hidden>
         <h2>Bảng &amp; cột</h2>
         <div id="tables"></div>
@@ -82,10 +122,10 @@
     </section>
 </main>
 
-<script src="/js/api.js?v=20260527-download2"></script>
-<script src="/js/auth.js?v=20260527-download2"></script>
-<script src="/js/dataset-detail.js?v=20260527-download2"></script>
-<script src="/js/api-keys.js?v=20260527-download2"></script>
+<script src="/js/api.js?v=20260529-token-guard"></script>
+<script src="/js/auth.js?v=20260529-token-guard"></script>
+<script src="/js/dataset-detail.js?v=20260529-token-guard"></script>
+<script src="/js/api-keys.js?v=20260529-token-guard"></script>
 <script>
     DatasetDetail.init();
 </script>

@@ -28,6 +28,9 @@ public static class ErrorCodes
     public const string TableNotFound = "TABLE_NOT_FOUND";
     public const string QueryTimeout = "QUERY_TIMEOUT";
     public const string QueryFailed = "QUERY_FAILED";
+    public const string TokenBudgetConfirmationRequired = "TOKEN_BUDGET_CONFIRMATION_REQUIRED";
+    public const string TokenBudgetHardLimitExceeded = "TOKEN_BUDGET_HARD_LIMIT_EXCEEDED";
+    public const string InvalidConfirmation = "INVALID_CONFIRMATION";
 
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string Internal = "INTERNAL_ERROR";

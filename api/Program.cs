@@ -210,6 +210,7 @@ builder.Services.AddScoped<UserApiKeyService>();
 builder.Services.AddScoped<DuckDbQueryService>();
 builder.Services.AddScoped<FileParserService>();
 builder.Services.AddScoped<ManifestGenerator>();
+builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<FileStorageService>();
 builder.Services.AddSingleton<HeaderNormalizer>();
 builder.Services.AddSingleton<QueryValidator>();
@@ -392,6 +393,18 @@ datasets.MapGet("/{datasetId:guid}", async (Guid datasetId, ClaimsPrincipal prin
         ? Results.Ok(new { success = true, dataset = result.Data!.Dataset, tables = result.Data.Tables })
         : Results.NotFound(new { success = false, error = result.Error });
 });
+
+datasets.MapPut("/{datasetId:guid}/business-knowledge",
+    async (Guid datasetId, UpdateBusinessKnowledgeRequest req, ClaimsPrincipal principal, DatasetService svc, CancellationToken ct) =>
+{
+    var userId = principal.GetUserId()!.Value;
+    var result = await svc.UpdateBusinessKnowledgeAsync(userId, datasetId, req.BusinessKnowledge, ct);
+    return result.Success
+        ? Results.Ok(new { success = true, data = result.Data })
+        : result.Error?.Code == ErrorCodes.DatasetNotFound
+            ? Results.NotFound(new { success = false, error = result.Error })
+            : Results.BadRequest(new { success = false, error = result.Error });
+}).RequireAuthorization("JwtOnly");
 
 datasets.MapDelete("/{datasetId:guid}", async (Guid datasetId, ClaimsPrincipal principal, DatasetService svc, CancellationToken ct) =>
 {

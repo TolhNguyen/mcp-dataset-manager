@@ -97,7 +97,11 @@ Response:
 ```json
 {
   "success": true,
-  "dataset": { ... cùng schema như list item },
+  "dataset": {
+    "...": "...",
+    "business_knowledge": "Chỉ tính doanh thu với đơn Completed...",
+    "business_knowledge_updated_at": "2026-05-29T08:00:00Z"
+  },
   "tables": [
     {
       "table_name": "raw_sheet1",
@@ -120,6 +124,33 @@ Response:
       ]
     }
   ]
+}
+```
+
+### PUT `/api/datasets/{dataset_id}/business-knowledge`
+Auth: Bearer JWT only.
+
+Body:
+```json
+{ "business_knowledge": "Chỉ tính doanh thu với đơn Completed..." }
+```
+
+Rules:
+- `null` becomes an empty string.
+- Trailing whitespace is trimmed.
+- Max length is 10,000 characters.
+- Saving regenerates `manifest.md` when metadata is available.
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "dataset_id": "uuid",
+    "business_knowledge": "...",
+    "business_knowledge_updated_at": "2026-05-29T08:00:00Z",
+    "manifest_updated": true
+  }
 }
 ```
 
@@ -172,7 +203,8 @@ Body:
   "options": {
     "max_rows": 100,
     "return_format": "compact",
-    "include_sql": true
+    "include_sql": true,
+    "response_mode": "ai_safe"
   }
 }
 ```
@@ -204,6 +236,13 @@ Response (200, success):
     "executed":  "SELECT * FROM (SELECT region, SUM(revenue) ...) AS _user_query LIMIT 100"
   },
   "warnings": [],
+  "ai_budget": {
+    "estimated_tokens": 12000,
+    "safe_max_tokens": 32000,
+    "hard_max_tokens": 512000,
+    "requires_confirmation": false,
+    "blocked": false
+  },
   "error": null
 }
 ```
@@ -245,6 +284,14 @@ Các error code SQL: `INVALID_SQL`, `NON_READONLY_SQL`, `COLUMN_NOT_FOUND`, `TAB
 - Dùng `normalized_name` từ manifest, không dùng header gốc tiếng Việt.
 - Không dùng `read_csv`, `read_parquet`, `attach`, ... — bị blacklist.
 - Mặc định server thêm `LIMIT 100`; muốn nhiều hơn thì chỉ định `options.max_rows` (hard cap 1000).
+
+### AI token budget
+
+- Safe results return the normal `compact_table` response with `ai_budget`.
+- Results above the safe budget return `TOKEN_BUDGET_CONFIRMATION_REQUIRED` with `summary.preview_rows`, suggestions, and a `confirmation_id`.
+- Retry with `options.allow_large_result = true`, the returned `confirmation_id`, and `response_mode = "raw"` to receive raw rows when still under the hard limit.
+- Results above the hard budget return `TOKEN_BUDGET_HARD_LIMIT_EXCEEDED` and never return raw rows.
+- Claude/MCP clients should refine SQL by selecting fewer columns, adding filters, aggregating with `GROUP BY`, or using `response_mode = "summary"`.
 
 ## Health
 

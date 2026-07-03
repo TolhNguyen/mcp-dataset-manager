@@ -35,7 +35,7 @@ const Api = {
         this.user = null;
     },
 
-    async request(method, path, { body, isForm = false, headers = {} } = {}) {
+    async request(method, path, { body, isForm = false, headers = {}, allowFailure = false } = {}) {
         const finalHeaders = { ...headers };
         if (this.token) finalHeaders['Authorization'] = `Bearer ${this.token}`;
 
@@ -67,6 +67,10 @@ const Api = {
 
         const json = await response.json();
 
+        if (allowFailure && response.ok) {
+            return json;
+        }
+
         if (!response.ok || json.success === false) {
             const err = json.error || {};
             throw new ApiError(err.code || 'HTTP_' + response.status,
@@ -79,6 +83,8 @@ const Api = {
 
     get(path) { return this.request('GET', path); },
     post(path, body) { return this.request('POST', path, { body }); },
+    postAllowFailure(path, body) { return this.request('POST', path, { body, allowFailure: true }); },
+    put(path, body) { return this.request('PUT', path, { body }); },
     delete(path) { return this.request('DELETE', path); },
 
     async downloadFile(path, fallbackFileName) {
