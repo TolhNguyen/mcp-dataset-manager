@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BaseOutputPath>..\..\.tmp\tests-bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>..\..\.tmp\tests-obj\ExcelDatasetManager.Tests\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\..\api\ExcelDatasetManager.Api.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,6 +1,7 @@
 const DatasetDetail = {
     datasetId: null,
     pollTimer: null,
+    businessKnowledgeDirty: false,
 
     async init() {
         if (!AuthPage.requireAuth()) return;
@@ -13,6 +14,20 @@ const DatasetDetail = {
         }
 
         $('#runQueryBtn').addEventListener('click', () => this.runQuery());
+        $('#saveBusinessKnowledgeBtn').addEventListener('click', () => this.saveBusinessKnowledge());
+        $('#businessKnowledgeInput').addEventListener('input', () => {
+            this.businessKnowledgeDirty = true;
+        });
+        $('#businessKnowledgeChips').addEventListener('click', (event) => {
+            const btn = event.target.closest('button[data-template]');
+            if (!btn) return;
+            this.appendBusinessKnowledgeTemplate(btn.dataset.template || '');
+        });
+        window.addEventListener('beforeunload', (event) => {
+            if (!this.businessKnowledgeDirty) return;
+            event.preventDefault();
+            event.returnValue = '';
+        });
 
         await this.refresh();
     },
@@ -21,6 +36,7 @@ const DatasetDetail = {
         try {
             const result = await Api.get(`/api/datasets/${this.datasetId}`);
             this.renderDataset(result.dataset);
+            this.renderBusinessKnowledge(result.dataset);
             this.renderTables(result.tables);
             await ApiKeys.refresh(this.datasetId);
 
@@ -77,6 +93,58 @@ const DatasetDetail = {
         $('#tablesCard').hidden = !isReady;
         $('#apiKeysCard').hidden = !isReady;
         $('#queryCard').hidden = !isReady;
+    },
+
+    renderBusinessKnowledge(d) {
+        const card = $('#businessKnowledgeCard');
+        const input = $('#businessKnowledgeInput');
+        const savedAt = $('#businessKnowledgeSavedAt');
+
+        card.hidden = false;
+        if (!this.businessKnowledgeDirty) {
+            input.value = d.business_knowledge || '';
+        }
+
+        savedAt.textContent = d.business_knowledge_updated_at
+            ? `Đã lưu: ${formatDate(d.business_knowledge_updated_at)}`
+            : 'Chưa lưu gợi ý nào';
+    },
+
+    appendBusinessKnowledgeTemplate(template) {
+        const input = $('#businessKnowledgeInput');
+        const prefix = input.value.trim().length > 0 ? '\n\n' : '';
+        input.value += prefix + template;
+        input.focus();
+        this.businessKnowledgeDirty = true;
+    },
+
+    async saveBusinessKnowledge() {
+        const input = $('#businessKnowledgeInput');
+        const button = $('#saveBusinessKnowledgeBtn');
+        const status = $('#businessKnowledgeStatus');
+
+        button.disabled = true;
+        status.hidden = false;
+        status.className = 'status-msg info';
+        status.textContent = 'Đang lưu...';
+
+        try {
+            const result = await Api.put(`/api/datasets/${this.datasetId}/business-knowledge`, {
+                business_knowledge: input.value
+            });
+
+            this.businessKnowledgeDirty = false;
+            status.className = 'status-msg success';
+            status.textContent = result.data.manifest_updated
+                ? 'Đã lưu và cập nhật manifest.md.'
+                : 'Đã lưu. Manifest sẽ được cập nhật lại khi metadata sẵn sàng.';
+            $('#businessKnowledgeSavedAt').textContent = `Đã lưu: ${formatDate(result.data.business_knowledge_updated_at)}`;
+        } catch (err) {
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Không lưu được gợi ý dữ liệu.';
+        } finally {
+            button.disabled = false;
+        }
     },
 
     renderTables(tables) {
@@ -148,18 +216,23 @@ const DatasetDetail = {
         resultBox.hidden = true;
 
         try {
-            const result = await Api.post(`/api/datasets/${this.datasetId}/query`, {
+            const result = await Api.postAllowFailure(`/api/datasets/${this.datasetId}/query`, {
                 query_type: 'sql',
                 sql,
                 options: { max_rows: maxRows, include_sql: true }
             });
 
             if (!result.success) {
-                this.renderQueryError(result.error, result.retry_hint);
+                this.renderQueryError(result.error, result.retry_hint, result);
                 return;
             }
 
             status.hidden = true;
+            if (result.status === 'summary') {
+                this.renderQuerySummary(result);
+                return;
+            }
+
             const r = result.result;
             $('#queryMeta').textContent =
                 `${r.row_count} dòng · ${result.execution.elapsed_ms} ms`
@@ -170,6 +243,17 @@ const DatasetDetail = {
         } catch (err) {
             this.renderQueryError({ code: err.code, message: err.message, details: err.details });
         }
+    },
+
+    renderQuerySummary(result) {
+        const summary = result.summary;
+        const resultBox = $('#queryResult');
+
+        $('#queryMeta').textContent =
+            `${summary.total_rows_returned} dòng · ${summary.total_columns} cột · ước lượng ${result.ai_budget.estimated_tokens} tokens`;
+
+        $('#resultTable').innerHTML = this.renderResultTable(summary.columns, summary.preview_rows || []);
+        resultBox.hidden = false;
     },
 
     renderResultTable(columns, rows) {
@@ -186,12 +270,16 @@ const DatasetDetail = {
         return headerHtml + bodyHtml;
     },
 
-    renderQueryError(error, retryHint) {
+    renderQueryError(error, retryHint, fullResult) {
         const status = $('#queryStatus');
         status.hidden = false;
         status.className = 'status-msg error';
 
         let html = `<strong>${escapeHtml(error.code)}</strong>: ${escapeHtml(error.message)}`;
+
+        if (fullResult?.ai_budget) {
+            html += `<br>Ước lượng: ${fullResult.ai_budget.estimated_tokens.toLocaleString()} tokens`;
+        }
 
         if (error.details && error.details.suggested_columns?.length) {
             html += `<br>Cột gợi ý: ${error.details.suggested_columns.map(c => `<code>${escapeHtml(c)}</code>`).join(', ')}`;
@@ -201,6 +289,9 @@ const DatasetDetail = {
         }
         if (retryHint?.message) {
             html += `<br>${escapeHtml(retryHint.message)}`;
+        }
+        if (fullResult?.suggestions?.length) {
+            html += '<ul>' + fullResult.suggestions.map(s => `<li>${escapeHtml(s)}</li>`).join('') + '</ul>';
         }
 
         status.innerHTML = html;

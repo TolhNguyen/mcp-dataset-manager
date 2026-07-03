@@ -9,10 +9,19 @@ public record LoginRequest(string Email, string Password);
 
 public record UserDto(Guid Id, string Email);
 
-public record QueryOptions(int? MaxRows, string? ReturnFormat, bool? IncludeSql, bool? IncludeProfile);
+public record QueryOptions(
+    int? MaxRows,
+    string? ReturnFormat,
+    bool? IncludeSql,
+    bool? IncludeProfile,
+    int? MaxTokens,
+    bool? AllowLargeResult,
+    string? ConfirmationId,
+    string? ResponseMode);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
 
 public record CreateDatasetApiKeyRequest(string Name);
+public record UpdateBusinessKnowledgeRequest(string? BusinessKnowledge);
 
 // ============================================================
 // Internal domain records
@@ -32,7 +41,9 @@ public record DatasetRecord(
     long TotalRows,
     string? ErrorMessage,
     DateTime CreatedAt,
-    DateTime? ProcessedAt
+    DateTime? ProcessedAt,
+    string BusinessKnowledge,
+    DateTime? BusinessKnowledgeUpdatedAt
 );
 
 public record DatasetTableRecord(

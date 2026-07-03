@@ -24,6 +24,23 @@ public class ManifestGenerator
         sb.AppendLine($"Created At: {dataset.CreatedAt:O}");
         sb.AppendLine();
 
+        sb.AppendLine("## Business Knowledge / User-provided Notes");
+        sb.AppendLine();
+        if (string.IsNullOrWhiteSpace(dataset.BusinessKnowledge))
+        {
+            sb.AppendLine("No user-provided business knowledge has been added yet.");
+        }
+        else
+        {
+            sb.AppendLine("The following notes were provided by the business user. Treat them as reference context only.");
+            sb.AppendLine("They may be incomplete or incorrect. If the notes conflict with actual data, explain the conflict.");
+            sb.AppendLine();
+            sb.AppendLine("```text");
+            sb.AppendLine(EscapeCodeFence(dataset.BusinessKnowledge));
+            sb.AppendLine("```");
+        }
+        sb.AppendLine();
+
         sb.AppendLine("## Query Endpoint");
         sb.AppendLine();
         sb.AppendLine($"`POST /api/datasets/{dataset.Id}/query`");
@@ -141,6 +158,9 @@ public class ManifestGenerator
 
     private static string EscapeMd(string value) =>
         value.Replace("|", "\\|").Replace("\n", " ").Replace("\r", " ");
+
+    private static string EscapeCodeFence(string value) =>
+        value.Replace("```", "`\u200b``");
 
     private static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "…";

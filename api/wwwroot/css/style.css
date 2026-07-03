@@ -192,6 +192,30 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
     width: 96px;
 }
 
+.chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0 4px;
+}
+
+.chip {
+    background: #f8fafc;
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 6px 10px;
+    font-size: 13px;
+}
+
+.chip:hover:not(:disabled) {
+    background: #eef2ff;
+    border-color: #c7d2fe;
+}
+
+.business-knowledge-actions {
+    justify-content: flex-start;
+}
+
 /* ============================================================ */
 /* Auth pages                                                    */
 /* ============================================================ */

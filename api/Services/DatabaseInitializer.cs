@@ -29,10 +29,16 @@ public class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<DatabaseIn
                 status VARCHAR(50) NOT NULL,
                 table_count INT NOT NULL DEFAULT 0,
                 total_rows BIGINT NOT NULL DEFAULT 0,
+                business_knowledge TEXT NOT NULL DEFAULT '',
+                business_knowledge_updated_at TIMESTAMPTZ,
                 error_message TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 processed_at TIMESTAMPTZ
             );
+
+            ALTER TABLE datasets
+            ADD COLUMN IF NOT EXISTS business_knowledge TEXT NOT NULL DEFAULT '',
+            ADD COLUMN IF NOT EXISTS business_knowledge_updated_at TIMESTAMPTZ;
 
             CREATE INDEX IF NOT EXISTS idx_datasets_user_id_created_at
             ON datasets(user_id, created_at DESC);
@@ -79,10 +85,16 @@ public class DatabaseInitializer(NpgsqlDataSource dataSource, ILogger<DatabaseIn
                 status VARCHAR(50) NOT NULL,
                 elapsed_ms INT,
                 row_count INT,
+                estimated_tokens INT,
+                ai_budget_status VARCHAR(50),
                 error_code VARCHAR(64),
                 error_message TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+
+            ALTER TABLE query_logs
+            ADD COLUMN IF NOT EXISTS estimated_tokens INT,
+            ADD COLUMN IF NOT EXISTS ai_budget_status VARCHAR(50);
 
             CREATE INDEX IF NOT EXISTS idx_query_logs_dataset_created
             ON query_logs(dataset_id, created_at DESC);

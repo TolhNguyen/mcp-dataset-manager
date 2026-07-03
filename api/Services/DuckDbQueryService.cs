@@ -13,6 +13,7 @@ public class DuckDbQueryService(
     DatasetService datasetService,
     FileStorageService storage,
     QueryValidator validator,
+    AiTokenBudgetService aiTokenBudget,
     ILogger<DuckDbQueryService> logger)
 {
     public async Task<object> QueryAsync(Guid userId, Guid datasetId, QueryRequest request, CancellationToken ct)
@@ -24,7 +25,7 @@ public class DuckDbQueryService(
         if (!validation.Success)
         {
             await LogAsync(queryId, datasetId, userId, request.Sql, null, "failed",
-                (int)sw.ElapsedMilliseconds, 0, validation.Code, validation.Message);
+                (int)sw.ElapsedMilliseconds, 0, null, null, validation.Code, validation.Message);
             return BuildErrorResponse(datasetId, queryId, request.Sql, null,
                 validation.Code!, validation.Message!, sw.ElapsedMilliseconds);
         }
@@ -98,8 +99,73 @@ public class DuckDbQueryService(
             }
 
             sw.Stop();
+            var result = new
+            {
+                format = "compact_table",
+                columns,
+                rows,
+                row_count = rows.Count,
+                truncated = rows.Count >= maxRows,
+                next_cursor = (string?)null
+            };
+
+            var confirmationScope = BuildConfirmationScope(userId, datasetId, executedSql);
+            var budgetDecision = aiTokenBudget.Decide(result, request.Options, confirmationScope);
+            var aiBudget = BuildAiBudget(budgetDecision);
+            var summary = BuildSummary(columns, rows, budgetDecision.Status == "blocked");
+
+            if (!budgetDecision.AllowRaw)
+            {
+                await LogAsync(queryId, datasetId, userId, request.Sql, executedSql, budgetDecision.Status,
+                    (int)sw.ElapsedMilliseconds, rows.Count, budgetDecision.EstimatedTokens, budgetDecision.Status, null, null);
+
+                if (budgetDecision.Status == "summary")
+                {
+                    return new
+                    {
+                        success = true,
+                        dataset_id = datasetId,
+                        query_id = queryId,
+                        status = "summary",
+                        result = (object?)null,
+                        summary,
+                        execution = new
+                        {
+                            engine = "duckdb",
+                            elapsed_ms = sw.ElapsedMilliseconds,
+                            max_rows = maxRows
+                        },
+                        sql = new { submitted = request.Sql, executed = executedSql },
+                        ai_budget = aiBudget,
+                        suggestions = BuildSuggestions(),
+                        error = (object?)null
+                    };
+                }
+
+                if (request.Options?.AllowLargeResult == true && !string.IsNullOrWhiteSpace(request.Options.ConfirmationId))
+                {
+                    return BuildTokenBudgetError(datasetId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
+                        summary, aiBudget, ErrorCodes.InvalidConfirmation,
+                        "Confirmation is missing, expired, or does not match this query result.",
+                        "requires_confirmation");
+                }
+
+                if (budgetDecision.Status == "blocked")
+                {
+                    return BuildTokenBudgetError(datasetId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
+                        summary, aiBudget, ErrorCodes.TokenBudgetHardLimitExceeded,
+                        $"Query result is estimated at {budgetDecision.EstimatedTokens} tokens, exceeding the hard maximum of {budgetDecision.HardMaxTokens} tokens. Raw result cannot be returned through AI chat.",
+                        "blocked");
+                }
+
+                return BuildTokenBudgetError(datasetId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
+                    summary, aiBudget, ErrorCodes.TokenBudgetConfirmationRequired,
+                    $"Query result is estimated at {budgetDecision.EstimatedTokens} tokens, exceeding the safe AI reading budget of {budgetDecision.SafeMaxTokens} tokens. Confirm to return raw result or refine the query.",
+                    "requires_confirmation");
+            }
+
             await LogAsync(queryId, datasetId, userId, request.Sql, executedSql, "completed",
-                (int)sw.ElapsedMilliseconds, rows.Count, null, null);
+                (int)sw.ElapsedMilliseconds, rows.Count, budgetDecision.EstimatedTokens, budgetDecision.Status, null, null);
 
             return new
             {
@@ -107,21 +173,14 @@ public class DuckDbQueryService(
                 dataset_id = datasetId,
                 query_id = queryId,
                 status = "completed",
-                result = new
-                {
-                    format = "compact_table",
-                    columns,
-                    rows,
-                    row_count = rows.Count,
-                    truncated = rows.Count >= maxRows,
-                    next_cursor = (string?)null
-                },
+                result,
                 execution = new
                 {
                     engine = "duckdb",
                     elapsed_ms = sw.ElapsedMilliseconds,
                     max_rows = maxRows
                 },
+                ai_budget = aiBudget,
                 sql = new
                 {
                     submitted = request.Sql,
@@ -136,7 +195,7 @@ public class DuckDbQueryService(
             sw.Stop();
             var mapped = DuckDbErrorMapper.Map(ex.Message);
             await LogAsync(queryId, datasetId, userId, request.Sql, executedSql, "failed",
-                (int)sw.ElapsedMilliseconds, 0, mapped.Code, ex.Message);
+                (int)sw.ElapsedMilliseconds, 0, null, null, mapped.Code, ex.Message);
 
             object? details = null;
             object? retryHint = null;
@@ -292,10 +351,83 @@ public class DuckDbQueryService(
         };
     }
 
+    private object BuildTokenBudgetError(
+        Guid datasetId,
+        Guid queryId,
+        string submittedSql,
+        string? executedSql,
+        long elapsedMs,
+        object summary,
+        object aiBudget,
+        string code,
+        string message,
+        string status)
+    {
+        return new
+        {
+            success = false,
+            dataset_id = datasetId,
+            query_id = queryId,
+            status,
+            result = (object?)null,
+            summary,
+            execution = new { engine = "duckdb", elapsed_ms = elapsedMs },
+            sql = new { submitted = submittedSql, executed = executedSql },
+            ai_budget = aiBudget,
+            error = new
+            {
+                code,
+                message,
+                retryable = true
+            },
+            suggestions = BuildSuggestions()
+        };
+    }
+
+    private object BuildSummary(List<object> columns, List<object?[]> rows, bool omitPreviewRows)
+    {
+        var previewRows = omitPreviewRows
+            ? Array.Empty<object?[]>()
+            : rows.Take(aiTokenBudget.PreviewRows).ToArray();
+
+        return new
+        {
+            format = "query_result_summary",
+            total_rows_returned = rows.Count,
+            total_columns = columns.Count,
+            preview_rows = previewRows,
+            preview_row_count = previewRows.Length,
+            columns
+        };
+    }
+
+    private static string[] BuildSuggestions() =>
+    [
+        "Use SELECT with only required columns instead of SELECT *.",
+        "Add WHERE filters to reduce rows.",
+        "Use GROUP BY to aggregate before returning data.",
+        "Use LIMIT 100 for inspection.",
+        "Use summary mode if you only need data shape and examples."
+    ];
+
+    private static object BuildAiBudget(AiBudgetDecision decision) => new
+    {
+        estimated_tokens = decision.EstimatedTokens,
+        safe_max_tokens = decision.SafeMaxTokens,
+        hard_max_tokens = decision.HardMaxTokens,
+        requires_confirmation = decision.RequiresConfirmation,
+        blocked = decision.Blocked,
+        confirmation_id = decision.ConfirmationId
+    };
+
+    private static string BuildConfirmationScope(Guid userId, Guid datasetId, string sql) =>
+        $"{userId:N}:{datasetId:N}:{sql}";
+
     private async Task LogAsync(
         Guid queryId, Guid datasetId, Guid userId,
         string submittedSql, string? executedSql, string status,
-        int elapsedMs, int rowCount, string? errorCode, string? errorMessage)
+        int elapsedMs, int rowCount, int? estimatedTokens, string? aiBudgetStatus,
+        string? errorCode, string? errorMessage)
     {
         try
         {
@@ -303,10 +435,10 @@ public class DuckDbQueryService(
             await conn.ExecuteAsync("""
                 INSERT INTO query_logs
                     (id, dataset_id, user_id, sql_submitted, sql_executed, status,
-                     elapsed_ms, row_count, error_code, error_message)
+                     elapsed_ms, row_count, estimated_tokens, ai_budget_status, error_code, error_message)
                 VALUES
                     (@Id, @DatasetId, @UserId, @SubmittedSql, @ExecutedSql, @Status,
-                     @ElapsedMs, @RowCount, @ErrorCode, @ErrorMessage)
+                     @ElapsedMs, @RowCount, @EstimatedTokens, @AiBudgetStatus, @ErrorCode, @ErrorMessage)
                 """, new
             {
                 Id = queryId,
@@ -317,6 +449,8 @@ public class DuckDbQueryService(
                 Status = status,
                 ElapsedMs = elapsedMs,
                 RowCount = rowCount,
+                EstimatedTokens = estimatedTokens,
+                AiBudgetStatus = aiBudgetStatus,
                 ErrorCode = errorCode,
                 ErrorMessage = errorMessage is null ? null : (errorMessage.Length > 4000 ? errorMessage[..4000] : errorMessage)
             });
