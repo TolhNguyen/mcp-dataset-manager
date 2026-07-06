@@ -89,7 +89,7 @@ public class QueryValidator
     /// Returns the input with single-quoted string literals and SQL comments replaced by spaces.
     /// This lets us safely run keyword scans without false positives on text inside strings.
     /// </summary>
-    internal static string StripStringsAndComments(string sql)
+    public static string StripStringsAndComments(string sql)
     {
         var sb = new StringBuilder(sql.Length);
         var inSingle = false;
