@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <title>Dang tai file...</title>
+    <style>
+        body { font-family: system-ui, sans-serif; margin: 48px; color: #0f172a; }
+        .muted { color: #64748b; }
+        .error { color: #b91c1c; }
+    </style>
+</head>
+<body>
+    <h1>Dang tai file...</h1>
+    <p id="status" class="muted">Vui long doi trong giay lat.</p>
+    <p><a href="/dashboard.html">Quay lai dashboard</a></p>
+    <script>
+    (async () => {
+        const status = document.getElementById('status');
+        const token = localStorage.getItem('edm_token');
+        if (!token) {
+            window.location.replace('/login.html');
+            return;
+        }
+
+        try {
+            const response = await fetch(window.location.href, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+
+            if (!response.ok) {
+                status.className = 'error';
+                status.textContent = `Khong tai duoc file (HTTP ${response.status}).`;
+                return;
+            }
+
+            const blob = await response.blob();
+            const disposition = response.headers.get('content-disposition') || '';
+            const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+            const quoted = disposition.match(/filename="?([^";]+)"?/i);
+            const fileName = encoded ? decodeURIComponent(encoded[1]) : quoted ? quoted[1] : 'download';
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+            status.textContent = 'Da bat dau tai file.';
+            setTimeout(() => history.length > 1 ? history.back() : window.location.replace('/dashboard.html'), 700);
+        } catch (err) {
+            status.className = 'error';
+            status.textContent = err.message || 'Khong tai duoc file.';
+        }
+    })();
+    </script>
+</body>
+</html>
