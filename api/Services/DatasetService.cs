@@ -14,7 +14,6 @@ public class DatasetService(
     ManifestGenerator manifestGenerator,
     ILogger<DatasetService> logger)
 {
-    public const int MaxDatasetsPerUser = 10;
     public const int BusinessKnowledgeMaxLength = 10_000;
 
     public const string SelectDatasetSql = """
@@ -50,6 +49,8 @@ public class DatasetService(
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
 
+        var maxDatasets = await GetMaxDatasetsAsync(conn, userId);
+
         var used = await conn.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM datasets WHERE user_id = @UserId",
             new { UserId = userId });
@@ -76,7 +77,7 @@ public class DatasetService(
             BuildActions(r.DatasetId))).ToList();
 
         return new DatasetListPayload(
-            new DatasetLimit(MaxDatasetsPerUser, used, Math.Max(0, MaxDatasetsPerUser - used), used < MaxDatasetsPerUser),
+            new DatasetLimit(maxDatasets, used, Math.Max(0, maxDatasets - used), used < maxDatasets),
             items);
     }
 
@@ -124,17 +125,19 @@ public class DatasetService(
             "SELECT pg_advisory_xact_lock(hashtextextended(@UserKey::text, 0))",
             new { UserKey = userId }, tx);
 
+        var maxDatasets = await GetMaxDatasetsAsync(conn, userId, tx);
+
         var count = await conn.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM datasets WHERE user_id = @UserId",
             new { UserId = userId }, tx);
 
-        if (count >= MaxDatasetsPerUser)
+        if (count >= maxDatasets)
         {
             await tx.RollbackAsync(ct);
             return ApiResult<object>.Fail(
                 ErrorCodes.DatasetLimitReached,
-                $"Bạn đã đạt giới hạn {MaxDatasetsPerUser} dataset. Vui lòng xóa dataset cũ để upload thêm.",
-                new { max_datasets = MaxDatasetsPerUser, current_count = count });
+                $"Bạn đã đạt giới hạn {maxDatasets} dataset. Vui lòng xóa dataset cũ để upload thêm.",
+                new { max_datasets = maxDatasets, current_count = count });
         }
 
         storage.EnsureDatasetDirectories(userId, datasetId);
@@ -416,6 +419,11 @@ public class DatasetService(
             """, new { DatasetId = datasetId, TableName = tableName });
         return rows.ToList();
     }
+
+    private static Task<int> GetMaxDatasetsAsync(NpgsqlConnection conn, Guid userId, NpgsqlTransaction? tx = null) =>
+        conn.ExecuteScalarAsync<int>(
+            "SELECT max_datasets FROM users WHERE id = @UserId",
+            new { UserId = userId }, tx);
 
     private static object BuildActions(Guid datasetId) => new
     {
