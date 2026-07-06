@@ -43,6 +43,39 @@ Ghi nhận, KHÔNG làm đợt này: JWT cookie HttpOnly, confirmation store in-
 
 ---
 
+## Phase 0b — OAuth authorization cho MCP (UX như Pancake POS, không bắt user dán token)
+
+### Vấn đề
+Sau Phase 0, client MCP phải cấu hình thủ công `Authorization: Bearer edm_pat_...` — khó dùng với người dùng phổ thông. Chuẩn MCP hỗ trợ OAuth 2.1: Claude.ai tự mở trang authorize của server, user bấm cho phép, token được cấp tự động (như màn hình authorize của Pancake POS MCP).
+
+### Thiết kế: OAuth là lớp UX tự động phát PAT
+Access token phát ra qua OAuth **chính là một PAT `edm_pat_...`** được tạo tự động (tên: `Claude MCP (OAuth) <ngày>`). Nhờ đó:
+- Bridge/API giữ nguyên toàn bộ cơ chế bearer PAT của Phase 0.
+- User thấy và thu hồi được token trong màn hình quản lý PAT hiện có.
+- Không cần refresh token (PAT không hết hạn, thu hồi thủ công) — YAGNI.
+
+Hơn Pancake một bậc: trang authorize KHÔNG bắt dán API key — user đăng nhập bằng tài khoản EDM (hoặc dùng session cookie sẵn có) rồi bấm **Cho phép**.
+
+### Flow chuẩn MCP (OAuth 2.1)
+1. Claude gọi `/mcp` không token → bridge trả 401 kèm `WWW-Authenticate: Bearer resource_metadata="https://<domain>/.well-known/oauth-protected-resource"`.
+2. Claude đọc Protected Resource Metadata (RFC 9728) → biết authorization server = cùng domain.
+3. Claude đọc `/.well-known/oauth-authorization-server` (RFC 8414) → biết các endpoint.
+4. Dynamic Client Registration (RFC 7591): `POST /api/oauth/register` → cấp `client_id` (public client, không secret).
+5. Mở `GET /oauth/authorize?response_type=code&client_id=…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…` → user đăng nhập + bấm Cho phép → redirect về Claude kèm `code`.
+6. `POST /api/oauth/token` (form-urlencoded, kèm `code_verifier` PKCE) → trả `{access_token: "edm_pat_…", token_type: "Bearer"}`.
+
+### Bảo mật
+- **PKCE S256 bắt buộc** (từ chối `plain` và thiếu challenge). Public client, không client_secret.
+- Authorization code: random 256-bit, lưu **SHA-256 hash**, TTL 5 phút, **dùng 1 lần**, gắn chặt (client_id, redirect_uri, code_challenge, user_id).
+- `redirect_uri` phải khớp CHÍNH XÁC URI đã đăng ký; chỉ nhận `https://` (và `http://localhost`/`127.0.0.1` cho dev).
+- Endpoint register/token nằm sau rate limit `auth` (10/phút/IP).
+- Bảng mới: `oauth_clients`, `oauth_authorization_codes` (migration 0002).
+- Cấu hình public URL qua env `EDM_PUBLIC_URL` (issuer trong metadata; bridge dùng cho WWW-Authenticate).
+
+Routing (Caddy hiện có, không đổi): `/mcp*` → bridge; `/.well-known/*`, `/oauth/authorize`, `/api/oauth/*` → API.
+
+---
+
 ## Sub-project A — External Database Connections (live query)
 
 ### Nguyên tắc thiết kế

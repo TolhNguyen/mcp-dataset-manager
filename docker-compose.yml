@@ -32,12 +32,14 @@ services:
       Jwt__Key: ${JWT_KEY}
       Jwt__Issuer: ${JWT_ISSUER:-ExcelDatasetManager}
       Jwt__Audience: ${JWT_AUDIENCE:-ExcelDatasetManagerFrontend}
+      Encryption__MasterKey: ${EDM_ENCRYPTION_KEY}
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:-*}
       Upload__MaxFileSizeMb: ${MAX_UPLOAD_MB:-100}
       Query__DefaultLimit: ${QUERY_DEFAULT_LIMIT:-100}
       Query__HardMaxRows: ${QUERY_HARD_MAX_ROWS:-1000}
       Query__TimeoutSeconds: ${QUERY_TIMEOUT_SECONDS:-30}
       Query__MemoryLimit: ${QUERY_MEMORY_LIMIT:-1GB}
+      Proxy__TrustForwardedHeaders: "true"
     ports:
       - "${API_PORT:-5847}:8080"
     volumes:
