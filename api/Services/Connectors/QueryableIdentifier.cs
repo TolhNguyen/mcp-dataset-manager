@@ -11,7 +11,9 @@ namespace ExcelDatasetManager.Api.Services.Connectors;
 /// </summary>
 public static class QueryableIdentifier
 {
-    private static readonly Regex SafeCharset = new(@"^[A-Za-z0-9_.$]+$", RegexOptions.Compiled);
+    // \A/\z (not ^/$) so a trailing "\n" can't sneak past the allowlist — .NET's $ matches before a
+    // final newline even without RegexOptions.Multiline.
+    private static readonly Regex SafeCharset = new(@"\A[A-Za-z0-9_.$]+\z", RegexOptions.Compiled);
 
     /// <summary>
     /// Returns the quoted identifier (each dot-separated segment individually quoted), or null if

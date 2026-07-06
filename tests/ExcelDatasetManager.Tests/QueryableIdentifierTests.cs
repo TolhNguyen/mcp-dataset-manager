@@ -28,6 +28,8 @@ public class QueryableIdentifierTests
     [InlineData("orders.")]
     [InlineData(".orders")]
     [InlineData("orders..name")]
+    [InlineData("orders\n")]
+    [InlineData("orders\r\n")]
     public void Rejects_unsafe_identifiers(string? queryableName)
     {
         Assert.Null(QueryableIdentifier.TryQuote(queryableName, '"'));
