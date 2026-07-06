@@ -87,7 +87,8 @@ Ngay khi kết nối thành công, hệ thống tự động đọc và lưu là
 1. **Toàn bộ bảng/view** trong database (qua `information_schema` / `INFORMATION_SCHEMA.TABLES` / BigQuery dataset listing).
 2. **Toàn bộ cột + kiểu dữ liệu + nullable** mỗi bảng.
 3. **2 dòng dữ liệu mẫu mỗi bảng** (`SELECT * … LIMIT 2` theo dialect) → lưu vào `dataset_tables.sample_rows`.
-4. Row count ước tính (từ statistics của DB, không `COUNT(*)` bảng lớn).
+
+Không lấy row count (dữ liệu nguồn thay đổi liên tục, con số không có ý nghĩa) — `dataset_tables.row_count` để 0 và Context API bỏ field này với dataset external.
 
 Bộ metadata này được Context API (C1) trả cho AI **trước khi AI lập plan hoặc viết SQL** — tool description bắt buộc AI gọi `get_context` trước query đầu tiên. Sample rows có toggle `include_samples=false` per dataset cho dữ liệu nhạy cảm. Đây là dữ liệu duy nhất được lưu (2 dòng/bảng) — chấp nhận được vì mục đích gợi ý, user kiểm soát được bằng toggle.
 
@@ -196,8 +197,8 @@ GET /api/context?dataset_ids={id1},{id2}&tables=orders,customers&detail=summary|
     "source_kind": "external_db", "provider": "mysql", "dialect": "mysql",
     "tables": [{
       "table_name": "orders", "qualified_name": "sales.orders",
-      "row_count": 12000,
-      "columns": [{ "name": "order_id", "type": "VARCHAR", "display_name": "Mã đơn", "aliases": ["ma don"], "sample_values": ["…"] }]
+      "columns": [{ "name": "order_id", "type": "VARCHAR", "display_name": "Mã đơn", "aliases": ["ma don"] }],
+      "sample_rows": [["ORD-001", "2026-01-03", 1200000], ["ORD-002", "2026-01-03", 450000]]
     }],
     "knowledge": [{ "kind": "metric_definition", "title": "…", "content": "…", "source": "ai", "pinned": true }]
   }],
@@ -265,7 +266,7 @@ CREATE TABLE dashboard_widgets (
 
 ### Mô hình bảo mật (điểm mấu chốt của tính năng)
 1. **SQL đóng băng tại thời điểm lưu.** Browser chỉ gọi `GET /api/dashboards/{id}/widgets/{wid}/data` — không bao giờ gửi SQL. Đổi SQL phải qua PUT (JWT) hoặc MCP tool có quyền ghi.
-2. **Validate 2 lần:** lúc lưu (QueryValidator theo dialect của dataset + chạy thử `LIMIT 1` để bắt lỗi sớm) và lúc mỗi lần thực thi (phòng row trong Postgres bị sửa trực tiếp). Luôn read-only, luôn row cap (`Dashboard:MaxRowsPerWidget`, mặc định 500), luôn timeout.
+2. **Validate 2 lần:** lúc lưu (QueryValidator theo dialect của dataset + chạy thử `LIMIT 1` để bắt lỗi sớm) và lúc mỗi lần thực thi (phòng row trong Postgres bị sửa trực tiếp). Luôn read-only, luôn row cap (`Dashboard:MaxRowsPerWidget`, mặc định 1000 — kết quả widget đi thẳng ra browser, không qua AI nên không tốn token), luôn timeout.
 3. **Widget AI tạo gắn `source='ai'`** — UI hiện badge, user review/sửa/archive. Giới hạn `Dashboard:MaxWidgetsPerDashboard` (20) và 10 dashboard/user.
 4. **Chống nện DB khách:** `refresh_interval_sec` tối thiểu 30s; kết quả cache **in-memory** (IMemoryCache, TTL = refresh interval) — nhiều lần xem trong TTL không đánh thêm query nào vào DB nguồn; không ghi đĩa (giữ nguyên tắc không lưu dữ liệu). Widget data endpoint có rate limit riêng.
 5. **Xem dashboard yêu cầu JWT.** Share link công khai (signed URL, read-only) để phase sau — tách riêng phần rủi ro nhất.
