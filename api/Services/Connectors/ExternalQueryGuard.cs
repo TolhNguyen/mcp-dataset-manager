@@ -117,7 +117,7 @@ public static class ExternalQueryGuard
 
             if (Regex.IsMatch(scrubbed, @"\border\s+by\s+[^)]+$", RegexOptions.IgnoreCase))
             {
-                return $"{sql} OFFSET 0 ROWS FETCH NEXT {maxRows} ROWS ONLY";
+                return $"{sql}\nOFFSET 0 ROWS FETCH NEXT {maxRows} ROWS ONLY";
             }
 
             return $"SELECT TOP ({maxRows}) * FROM (  {sql}  ) AS _edm_q";

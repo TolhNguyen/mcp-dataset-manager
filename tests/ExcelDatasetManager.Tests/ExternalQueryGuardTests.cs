@@ -215,6 +215,15 @@ public class ExternalQueryGuardTests
     }
 
     [Fact]
+    public void ApplyRowCap_mssql_cap_survives_trailing_line_comment()
+    {
+        // Regression: the cap must not land on the same line as a trailing "--" comment,
+        // otherwise the comment swallows the cap and the query runs unbounded.
+        var result = ExternalQueryGuard.ApplyRowCap("SELECT * FROM big_table ORDER BY id --", ExternalDbProviders.MsSql, 100);
+        Assert.Contains("\nOFFSET 0 ROWS FETCH NEXT 100 ROWS ONLY", result);
+    }
+
+    [Fact]
     public void ApplyRowCap_mssql_keeps_existing_top()
     {
         var sql = "SELECT TOP 5 * FROM t";
