@@ -216,6 +216,7 @@ builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DatasetService>();
 builder.Services.AddScoped<DatasetApiKeyService>();
 builder.Services.AddScoped<UserApiKeyService>();
+builder.Services.AddScoped<OAuthService>();
 builder.Services.AddScoped<DuckDbQueryService>();
 builder.Services.AddScoped<FileParserService>();
 builder.Services.AddScoped<ManifestGenerator>();
