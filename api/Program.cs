@@ -330,6 +330,7 @@ app.MapAuthEndpoints();
 app.MapDatasetEndpoints();
 app.MapApiKeyEndpoints();
 app.MapQueryEndpoints();
+app.MapOAuthEndpoints();
 
 app.Run();
 

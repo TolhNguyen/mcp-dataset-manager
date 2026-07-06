@@ -22,6 +22,9 @@ public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
 
 public record CreateDatasetApiKeyRequest(string Name);
 public record UpdateBusinessKnowledgeRequest(string? BusinessKnowledge);
+public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
+public record OAuthApproveRequest(
+    string? ClientId, string? RedirectUri, string? CodeChallenge, string? CodeChallengeMethod, string? State);
 
 // ============================================================
 // Internal domain records
