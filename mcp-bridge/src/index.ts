@@ -254,6 +254,7 @@ async function runHttpServer() {
     res.setHeader("Access-Control-Allow-Origin", process.env.CORS_ALLOWED_ORIGIN ?? "*");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, MCP-Session-Id, Last-Event-ID");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Expose-Headers", "WWW-Authenticate, MCP-Session-Id");
     next();
   });
 
@@ -276,8 +277,7 @@ async function runHttpServer() {
     const sessionId = getSessionId(req);
     const pat = extractPat(req);
     if (!pat) {
-      return jsonRpcError(res, 401, -32001,
-        "Unauthorized: send 'Authorization: Bearer edm_pat_...' (create a personal access token in the EDM web UI).");
+      return unauthorized(res);
     }
     const context = buildRequestContext(req, pat, sessionId);
 
@@ -328,8 +328,7 @@ async function runHttpServer() {
     const sessionId = getSessionId(req);
     const pat = extractPat(req);
     if (!pat) {
-      return jsonRpcError(res, 401, -32001,
-        "Unauthorized: send 'Authorization: Bearer edm_pat_...' (create a personal access token in the EDM web UI).");
+      return unauthorized(res);
     }
     const context = buildRequestContext(req, pat, sessionId);
 
@@ -353,8 +352,7 @@ async function runHttpServer() {
     const sessionId = getSessionId(req);
     const pat = extractPat(req);
     if (!pat) {
-      return jsonRpcError(res, 401, -32001,
-        "Unauthorized: send 'Authorization: Bearer edm_pat_...' (create a personal access token in the EDM web UI).");
+      return unauthorized(res);
     }
     const context = buildRequestContext(req, pat, sessionId);
 
@@ -473,6 +471,16 @@ function extractPat(req: Request): string | undefined {
   if (!raw) return undefined;
   const match = PAT_PATTERN.exec(raw.trim());
   return match ? match[1] : undefined;
+}
+
+function unauthorized(res: Response) {
+  const publicUrl = (process.env.EDM_PUBLIC_URL ?? "http://localhost").replace(/\/+$/, "");
+  res.setHeader(
+    "WWW-Authenticate",
+    `Bearer resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`
+  );
+  jsonRpcError(res, 401, -32001,
+    "Unauthorized: send 'Authorization: Bearer edm_pat_...' (create a personal access token in the EDM web UI, or connect via OAuth).");
 }
 
 function getSessionId(req: Request): string | undefined {

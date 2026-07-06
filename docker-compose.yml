@@ -61,6 +61,7 @@ services:
       MCP_PORT: 5848
       MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-180}
       EDM_API_URL: http://api:8080
+      EDM_PUBLIC_URL: ${EDM_PUBLIC_URL:-http://localhost}
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-*}
     ports:
       - "${MCP_PORT:-5848}:5848"
