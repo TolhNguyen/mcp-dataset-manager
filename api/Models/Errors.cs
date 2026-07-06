@@ -21,6 +21,14 @@ public static class ErrorCodes
     public const string NoTableFound = "NO_TABLE_FOUND";
     public const string StorageError = "STORAGE_ERROR";
 
+    // External DB connections / live-query datasets
+    public const string ConnectionNotFound = "CONNECTION_NOT_FOUND";
+    public const string ConnectionInUse = "CONNECTION_IN_USE";
+    public const string TooManyTablesRequested = "TOO_MANY_TABLES_REQUESTED";
+    public const string ExternalSchemaFetchFailed = "EXTERNAL_SCHEMA_FETCH_FAILED";
+    public const string ExternalQueryFailed = "EXTERNAL_QUERY_FAILED";
+    public const string TooManyConcurrentQueries = "TOO_MANY_CONCURRENT_QUERIES";
+
     // Query
     public const string InvalidSql = "INVALID_SQL";
     public const string NonReadOnlySql = "NON_READONLY_SQL";

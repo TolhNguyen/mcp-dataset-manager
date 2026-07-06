@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Kết nối DB — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+    <h1><a href="/dashboard.html">Excel Dataset Manager</a></h1>
+    <div class="topbar-right">
+        <a href="/dashboard.html" class="btn-link">Dataset</a>
+        <span id="userEmail" class="muted"></span>
+        <button id="logoutBtn" class="btn-link">Đăng xuất</button>
+    </div>
+</header>
+
+<main class="container">
+    <section class="card">
+        <header class="card-head">
+            <h2>Kết nối cơ sở dữ liệu</h2>
+            <button id="addConnectionBtn">+ Thêm kết nối</button>
+        </header>
+
+        <p class="muted">
+            Kết nối tới cơ sở dữ liệu của bạn để tạo dataset "truy vấn trực tiếp" — EDM không sao chép
+            dữ liệu, chỉ lưu cấu trúc bảng (và tối đa 2 dòng mẫu nếu bạn cho phép).
+        </p>
+
+        <div id="connectionList" class="dataset-list">
+            <p class="muted">Đang tải…</p>
+        </div>
+    </section>
+</main>
+
+<!-- Add / edit connection modal -->
+<div id="connectionModal" class="modal-overlay" hidden>
+    <div class="modal">
+        <header class="modal-head">
+            <h2 id="connectionModalTitle">Thêm kết nối</h2>
+            <button type="button" class="modal-close" id="closeConnectionModalBtn" aria-label="Đóng">&times;</button>
+        </header>
+
+        <div class="warning-banner">
+            ⚠️ Hãy dùng tài khoản CHỈ có quyền SELECT (read-only). EDM không bao giờ ghi vào DB của bạn,
+            nhưng tài khoản read-only là lớp bảo vệ quan trọng nhất.
+        </div>
+
+        <form id="connectionForm">
+            <label>
+                <span>Tên kết nối</span>
+                <input type="text" name="name" id="connectionNameInput" required placeholder="Ví dụ: DB sản xuất" />
+            </label>
+
+            <div class="form-row" id="providerRadioRow">
+                <label><input type="radio" name="provider" value="postgresql" checked /> PostgreSQL</label>
+                <label><input type="radio" name="provider" value="mysql" /> MySQL</label>
+                <label><input type="radio" name="provider" value="mssql" /> SQL Server</label>
+                <label><input type="radio" name="provider" value="bigquery" /> BigQuery</label>
+            </div>
+
+            <div id="fieldsRelational">
+                <label>
+                    <span>Host</span>
+                    <input type="text" name="host" placeholder="db.example.com" />
+                </label>
+                <label>
+                    <span>Port</span>
+                    <input type="number" name="port" placeholder="Mặc định theo loại DB" />
+                </label>
+                <label>
+                    <span>Database</span>
+                    <input type="text" name="database" />
+                </label>
+                <label>
+                    <span>Username</span>
+                    <input type="text" name="username" autocomplete="off" />
+                </label>
+                <label>
+                    <span>Password <span id="passwordHint" class="muted"></span></span>
+                    <input type="password" name="password" autocomplete="new-password" />
+                </label>
+                <div class="form-row">
+                    <label><input type="checkbox" name="ssl" checked /> Dùng SSL</label>
+                </div>
+            </div>
+
+            <div id="fieldsBigQuery" hidden>
+                <label>
+                    <span>Project ID</span>
+                    <input type="text" name="project_id" placeholder="my-gcp-project" />
+                </label>
+                <label>
+                    <span>Dataset</span>
+                    <input type="text" name="dataset" placeholder="my_dataset" />
+                </label>
+                <label>
+                    <span>Service account JSON <span id="serviceAccountHint" class="muted"></span></span>
+                    <textarea name="service_account_json" rows="6" placeholder='{"client_email": "...", ...}'></textarea>
+                </label>
+                <label>
+                    <span>Max bytes billed (tuỳ chọn)</span>
+                    <input type="number" name="max_bytes_billed" placeholder="1073741824" />
+                </label>
+            </div>
+
+            <div id="connectionFormStatus" class="status-msg" hidden></div>
+
+            <div class="dataset-actions">
+                <button type="submit" id="saveConnectionBtn">Lưu kết nối</button>
+                <button type="button" class="btn-link" id="cancelConnectionBtn">Huỷ</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create-dataset-from-connection wizard -->
+<div id="wizardModal" class="modal-overlay" hidden>
+    <div class="modal">
+        <header class="modal-head">
+            <h2>Tạo dataset từ kết nối</h2>
+            <button type="button" class="modal-close" id="closeWizardModalBtn" aria-label="Đóng">&times;</button>
+        </header>
+
+        <div id="wizardStatus" class="status-msg" hidden></div>
+
+        <form id="wizardForm">
+            <label>
+                <span>Tên dataset</span>
+                <input type="text" name="name" id="wizardNameInput" required placeholder="Ví dụ: Đơn hàng - DB sản xuất" />
+            </label>
+
+            <div>
+                <span class="muted" style="display:block;margin-bottom:4px;font-size:13px">Chọn bảng</span>
+                <div id="wizardTables" class="table-scroll">
+                    <p class="muted">Đang tải danh sách bảng…</p>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <label>
+                    <input type="checkbox" name="include_samples" id="includeSamplesInput" checked />
+                    Lưu 2 dòng dữ liệu mẫu/bảng làm gợi ý cho AI (tắt nếu dữ liệu nhạy cảm)
+                </label>
+            </div>
+
+            <p class="muted" style="font-size:13px">
+                EDM chỉ lưu cấu trúc bảng và 2 dòng mẫu. Dữ liệu của bạn không được sao chép —
+                AI truy vấn trực tiếp DB nguồn.
+            </p>
+
+            <div class="dataset-actions">
+                <button type="submit" id="createWizardDatasetBtn">Tạo dataset</button>
+                <button type="button" class="btn-link" id="cancelWizardBtn">Huỷ</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/api.js?v=20260706-connections"></script>
+<script src="/js/auth.js?v=20260706-connections"></script>
+<script src="/js/connections.js?v=20260706-connections"></script>
+<script>
+    Connections.init();
+</script>
+</body>
+</html>

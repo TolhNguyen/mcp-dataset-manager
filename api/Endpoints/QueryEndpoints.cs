@@ -10,7 +10,9 @@ public static class QueryEndpoints
     public static void MapQueryEndpoints(this WebApplication app)
     {
         app.MapPost("/api/datasets/{datasetId:guid}/query",
-            async (Guid datasetId, QueryRequest req, ClaimsPrincipal principal, DuckDbQueryService svc, CancellationToken ct) =>
+            async (Guid datasetId, QueryRequest req, ClaimsPrincipal principal,
+                DuckDbQueryService duckDbSvc, ExternalQueryService externalSvc,
+                DatasetService datasetService, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -21,7 +23,12 @@ public static class QueryEndpoints
                 return Results.Forbid();
             }
 
-            var result = await svc.QueryAsync(userId.Value, datasetId, req, ct);
+            var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
+
+            var result = dataset is not null && string.Equals(dataset.SourceKind, "external_db", StringComparison.OrdinalIgnoreCase)
+                ? await externalSvc.QueryAsync(userId.Value, dataset, req, ct)
+                : await duckDbSvc.QueryAsync(userId.Value, datasetId, req, ct);
+
             return Results.Ok(result);
         })
         .RequireAuthorization("QueryAccess")

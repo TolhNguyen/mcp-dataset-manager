@@ -14,7 +14,6 @@ public class DatasetService(
     ManifestGenerator manifestGenerator,
     ILogger<DatasetService> logger)
 {
-    public const int MaxDatasetsPerUser = 10;
     public const int BusinessKnowledgeMaxLength = 10_000;
 
     public const string SelectDatasetSql = """
@@ -33,7 +32,9 @@ public class DatasetService(
                created_at AS CreatedAt,
                processed_at AS ProcessedAt,
                COALESCE(business_knowledge, '') AS BusinessKnowledge,
-               business_knowledge_updated_at AS BusinessKnowledgeUpdatedAt
+               business_knowledge_updated_at AS BusinessKnowledgeUpdatedAt,
+               source_kind AS SourceKind,
+               connection_id AS ConnectionId
         FROM datasets
         """;
 
@@ -50,6 +51,8 @@ public class DatasetService(
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
 
+        var maxDatasets = await GetMaxDatasetsAsync(conn, userId);
+
         var used = await conn.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM datasets WHERE user_id = @UserId",
             new { UserId = userId });
@@ -64,7 +67,8 @@ public class DatasetService(
                    total_rows AS TotalRows,
                    status AS Status,
                    error_message AS ErrorMessage,
-                   created_at AS CreatedAt
+                   created_at AS CreatedAt,
+                   source_kind AS SourceKind
             FROM datasets
             WHERE user_id = @UserId
             ORDER BY created_at DESC
@@ -73,10 +77,10 @@ public class DatasetService(
         var items = rows.Select(r => new DatasetListItem(
             r.DatasetId, r.Name, r.OriginalFileName, r.FileType, r.FileSizeBytes,
             r.TableCount, r.TotalRows, r.Status, r.ErrorMessage, r.CreatedAt,
-            BuildActions(r.DatasetId))).ToList();
+            BuildActions(r.DatasetId), r.SourceKind)).ToList();
 
         return new DatasetListPayload(
-            new DatasetLimit(MaxDatasetsPerUser, used, Math.Max(0, MaxDatasetsPerUser - used), used < MaxDatasetsPerUser),
+            new DatasetLimit(maxDatasets, used, Math.Max(0, maxDatasets - used), used < maxDatasets),
             items);
     }
 
@@ -124,17 +128,19 @@ public class DatasetService(
             "SELECT pg_advisory_xact_lock(hashtextextended(@UserKey::text, 0))",
             new { UserKey = userId }, tx);
 
+        var maxDatasets = await GetMaxDatasetsAsync(conn, userId, tx);
+
         var count = await conn.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM datasets WHERE user_id = @UserId",
             new { UserId = userId }, tx);
 
-        if (count >= MaxDatasetsPerUser)
+        if (count >= maxDatasets)
         {
             await tx.RollbackAsync(ct);
             return ApiResult<object>.Fail(
                 ErrorCodes.DatasetLimitReached,
-                $"Bạn đã đạt giới hạn {MaxDatasetsPerUser} dataset. Vui lòng xóa dataset cũ để upload thêm.",
-                new { max_datasets = MaxDatasetsPerUser, current_count = count });
+                $"Bạn đã đạt giới hạn {maxDatasets} dataset. Vui lòng xóa dataset cũ để upload thêm.",
+                new { max_datasets = maxDatasets, current_count = count });
         }
 
         storage.EnsureDatasetDirectories(userId, datasetId);
@@ -417,6 +423,11 @@ public class DatasetService(
         return rows.ToList();
     }
 
+    private static Task<int> GetMaxDatasetsAsync(NpgsqlConnection conn, Guid userId, NpgsqlTransaction? tx = null) =>
+        conn.ExecuteScalarAsync<int>(
+            "SELECT max_datasets FROM users WHERE id = @UserId",
+            new { UserId = userId }, tx);
+
     private static object BuildActions(Guid datasetId) => new
     {
         download_original_url = $"/api/datasets/{datasetId}/download/original",
@@ -515,7 +526,8 @@ public class DatasetService(
 
     private sealed record DatasetListRow(
         Guid DatasetId, string Name, string OriginalFileName, string FileType, long FileSizeBytes,
-        int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt);
+        int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt,
+        string SourceKind);
 
     private sealed record TableRow(Guid Id, string TableName, string SourceName, string SourceType, long RowCount, int ColumnCount);
     private sealed record ColumnRow(
@@ -536,7 +548,7 @@ public class DatasetService(
 public record DatasetListItem(
     Guid DatasetId, string Name, string OriginalFileName, string FileType, long FileSizeBytes,
     int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt,
-    object Actions);
+    object Actions, string SourceKind);
 
 public record DatasetLimit(int MaxDatasets, int Used, int Remaining, bool CanUpload);
 

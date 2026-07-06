@@ -25,4 +25,13 @@ public class MigrationScriptLoaderTests
         Assert.Equal(versions.OrderBy(v => v).ToList(), versions);
         Assert.Equal(versions.Count, versions.Distinct().Count());
     }
+
+    [Fact]
+    public void Loads_external_connections_migration()
+    {
+        var scripts = MigrationScriptLoader.LoadAll(typeof(MigrationRunner).Assembly);
+        var m3 = scripts.Single(s => s.Version == 3);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS db_connections", m3.Sql);
+        Assert.Contains("max_datasets", m3.Sql);
+    }
 }
