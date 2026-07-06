@@ -21,6 +21,10 @@ public static class ErrorCodes
     public const string NoTableFound = "NO_TABLE_FOUND";
     public const string StorageError = "STORAGE_ERROR";
 
+    // Knowledge
+    public const string KnowledgeNotFound = "KNOWLEDGE_NOT_FOUND";
+    public const string KnowledgeLimitReached = "KNOWLEDGE_LIMIT_REACHED";
+
     // External DB connections / live-query datasets
     public const string ConnectionNotFound = "CONNECTION_NOT_FOUND";
     public const string ConnectionInUse = "CONNECTION_IN_USE";
