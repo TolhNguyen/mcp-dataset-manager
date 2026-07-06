@@ -39,6 +39,7 @@ services:
       Query__HardMaxRows: ${QUERY_HARD_MAX_ROWS:-1000}
       Query__TimeoutSeconds: ${QUERY_TIMEOUT_SECONDS:-30}
       Query__MemoryLimit: ${QUERY_MEMORY_LIMIT:-1GB}
+      Proxy__TrustForwardedHeaders: "true"
     ports:
       - "${API_PORT:-5847}:8080"
     volumes:

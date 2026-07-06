@@ -12,6 +12,7 @@ using ExcelDatasetManager.Api.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
@@ -179,10 +180,10 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
 
-    // Per-IP query throttle for the query endpoint.
+    // Per-user query throttle for authenticated callers, falling back to IP for anonymous requests.
     options.AddPolicy("query", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            partitionKey: RateLimitPartitionKey.For(httpContext),
             factory: _ => new FixedWindowRateLimiterOptions
             {
                 PermitLimit = 60,
@@ -234,6 +235,19 @@ var app = builder.Build();
 // Catch-all exception handler MUST be first so it wraps every other middleware.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 
+// Behind a trusted reverse proxy (Caddy), honor X-Forwarded-* so rate limiting
+// and logs see the real client IP. Only enabled explicitly via config.
+if (builder.Configuration.GetValue<bool?>("Proxy:TrustForwardedHeaders") == true)
+{
+    var forwardedOptions = new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+    };
+    forwardedOptions.KnownNetworks.Clear();
+    forwardedOptions.KnownProxies.Clear();
+    app.UseForwardedHeaders(forwardedOptions);
+}
+
 app.Use(async (ctx, next) =>
 {
     if (TryGetBearerToken(ctx, out var bearerToken))
@@ -275,8 +289,8 @@ app.UseStaticFiles(new StaticFileOptions
         }
     }
 });
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 
 // ============================================================
