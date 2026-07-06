@@ -51,18 +51,6 @@ public static class DatasetEndpoints
                 : Results.NotFound(new { success = false, error = result.Error });
         });
 
-        datasets.MapPut("/{datasetId:guid}/business-knowledge",
-            async (Guid datasetId, UpdateBusinessKnowledgeRequest req, ClaimsPrincipal principal, DatasetService svc, CancellationToken ct) =>
-        {
-            var userId = principal.GetUserId()!.Value;
-            var result = await svc.UpdateBusinessKnowledgeAsync(userId, datasetId, req.BusinessKnowledge, ct);
-            return result.Success
-                ? Results.Ok(new { success = true, data = result.Data })
-                : result.Error?.Code == ErrorCodes.DatasetNotFound
-                    ? Results.NotFound(new { success = false, error = result.Error })
-                    : Results.BadRequest(new { success = false, error = result.Error });
-        }).RequireAuthorization("JwtOnly");
-
         datasets.MapDelete("/{datasetId:guid}", async (Guid datasetId, ClaimsPrincipal principal, DatasetService svc, CancellationToken ct) =>
         {
             var userId = principal.GetUserId()!.Value;

@@ -21,7 +21,7 @@ internal static class TestData
         return new AiTokenBudgetService(config);
     }
 
-    public static DatasetRecord NewDatasetRecord(string businessKnowledge) => new(
+    public static DatasetRecord NewDatasetRecord() => new(
         Id: Guid.Parse("11111111-1111-1111-1111-111111111111"),
         UserId: Guid.Parse("22222222-2222-2222-2222-222222222222"),
         Name: "Orders",
@@ -36,8 +36,6 @@ internal static class TestData
         ErrorMessage: null,
         CreatedAt: DateTime.UtcNow,
         ProcessedAt: DateTime.UtcNow,
-        BusinessKnowledge: businessKnowledge,
-        BusinessKnowledgeUpdatedAt: DateTime.UtcNow,
         SourceKind: "file",
         ConnectionId: null);
 

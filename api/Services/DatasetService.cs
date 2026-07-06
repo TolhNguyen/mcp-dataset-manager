@@ -11,11 +11,8 @@ public class DatasetService(
     IConfiguration configuration,
     FileStorageService storage,
     ParsingJobQueue parsingQueue,
-    ManifestGenerator manifestGenerator,
     ILogger<DatasetService> logger)
 {
-    public const int BusinessKnowledgeMaxLength = 10_000;
-
     public const string SelectDatasetSql = """
         SELECT id AS Id,
                user_id AS UserId,
@@ -31,8 +28,6 @@ public class DatasetService(
                error_message AS ErrorMessage,
                created_at AS CreatedAt,
                processed_at AS ProcessedAt,
-               COALESCE(business_knowledge, '') AS BusinessKnowledge,
-               business_knowledge_updated_at AS BusinessKnowledgeUpdatedAt,
                source_kind AS SourceKind,
                connection_id AS ConnectionId
         FROM datasets
@@ -295,75 +290,6 @@ public class DatasetService(
         return ApiResult<object>.Ok(new { deleted = true, dataset_id = datasetId });
     }
 
-    public async Task<ApiResult<object>> UpdateBusinessKnowledgeAsync(
-        Guid userId,
-        Guid datasetId,
-        string? businessKnowledge,
-        CancellationToken ct)
-    {
-        var normalized = (businessKnowledge ?? string.Empty).TrimEnd();
-        if (normalized.Length > BusinessKnowledgeMaxLength)
-        {
-            return ApiResult<object>.Fail(
-                ErrorCodes.ValidationError,
-                $"Business knowledge must not exceed {BusinessKnowledgeMaxLength} characters.",
-                new { max_length = BusinessKnowledgeMaxLength });
-        }
-
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-
-        var dataset = await conn.QuerySingleOrDefaultAsync<DatasetRecord>(
-            SelectDatasetSql + " WHERE id = @Id AND user_id = @UserId",
-            new { Id = datasetId, UserId = userId });
-
-        if (dataset is null)
-        {
-            return ApiResult<object>.Fail(ErrorCodes.DatasetNotFound, "Dataset not found.");
-        }
-
-        var updatedAt = await conn.ExecuteScalarAsync<DateTime>("""
-            UPDATE datasets
-            SET business_knowledge = @BusinessKnowledge,
-                business_knowledge_updated_at = NOW()
-            WHERE id = @DatasetId AND user_id = @UserId
-            RETURNING business_knowledge_updated_at
-            """, new
-        {
-            DatasetId = datasetId,
-            UserId = userId,
-            BusinessKnowledge = normalized
-        });
-
-        var manifestUpdated = false;
-        if (!string.IsNullOrWhiteSpace(dataset.ManifestFileName))
-        {
-            try
-            {
-                var tables = await LoadParsedTablesForManifestAsync(conn, datasetId);
-                var updatedDataset = dataset with
-                {
-                    BusinessKnowledge = normalized,
-                    BusinessKnowledgeUpdatedAt = updatedAt
-                };
-                var manifestPath = storage.GetManifestPath(userId, datasetId, dataset.ManifestFileName);
-                await manifestGenerator.GenerateAsync(manifestPath, updatedDataset, tables, [], ct);
-                manifestUpdated = true;
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Failed to regenerate manifest for dataset {DatasetId}", datasetId);
-            }
-        }
-
-        return ApiResult<object>.Ok(new
-        {
-            dataset_id = datasetId,
-            business_knowledge = normalized,
-            business_knowledge_updated_at = updatedAt,
-            manifest_updated = manifestUpdated
-        });
-    }
-
     public async Task<DownloadFile?> GetOriginalDownloadAsync(Guid userId, Guid datasetId, CancellationToken ct)
     {
         var dataset = await GetDatasetRecordAsync(userId, datasetId, ct);
@@ -450,72 +376,8 @@ public class DatasetService(
         error_message = d.ErrorMessage,
         created_at = d.CreatedAt,
         processed_at = d.ProcessedAt,
-        business_knowledge = d.BusinessKnowledge,
-        business_knowledge_updated_at = d.BusinessKnowledgeUpdatedAt,
         actions = BuildActions(d.Id)
     };
-
-    private static async Task<List<ParsedTable>> LoadParsedTablesForManifestAsync(
-        Npgsql.NpgsqlConnection conn,
-        Guid datasetId)
-    {
-        var tables = (await conn.QueryAsync<DatasetTableRecord>("""
-            SELECT id AS Id, dataset_id AS DatasetId, table_name AS TableName,
-                   source_name AS SourceName, source_type AS SourceType,
-                   data_file_name AS DataFileName, row_count AS RowCount, column_count AS ColumnCount
-            FROM dataset_tables
-            WHERE dataset_id = @DatasetId
-            ORDER BY table_name
-            """, new { DatasetId = datasetId })).ToList();
-
-        var columns = (await conn.QueryAsync<ManifestColumnRow>("""
-            SELECT c.dataset_table_id AS DatasetTableId,
-                   c.ordinal_position AS Ordinal,
-                   c.original_header AS OriginalHeader,
-                   c.normalized_name AS NormalizedName,
-                   c.display_name AS DisplayName,
-                   c.aliases AS Aliases,
-                   c.inferred_type AS InferredType,
-                   c.semantic_type AS SemanticType,
-                   c.null_count AS NullCount,
-                   c.distinct_count AS DistinctCount,
-                   c.sample_values::text AS SampleValuesJson
-            FROM dataset_columns c
-            JOIN dataset_tables t ON t.id = c.dataset_table_id
-            WHERE t.dataset_id = @DatasetId
-            ORDER BY c.dataset_table_id, c.ordinal_position
-            """, new { DatasetId = datasetId })).ToList();
-
-        return tables.Select(t => new ParsedTable(
-            SourceName: t.SourceName,
-            SourceType: t.SourceType,
-            TableName: t.TableName,
-            TempCsvPath: string.Empty,
-            ParquetFileName: t.DataFileName,
-            RowCount: t.RowCount,
-            Columns: columns
-                .Where(c => c.DatasetTableId == t.Id)
-                .Select(c => new ParsedColumn(
-                    Ordinal: c.Ordinal,
-                    OriginalHeader: c.OriginalHeader,
-                    NormalizedName: c.NormalizedName,
-                    DisplayName: c.DisplayName ?? c.NormalizedName,
-                    Aliases: c.Aliases ?? Array.Empty<string>(),
-                    InferredType: c.InferredType ?? "UNKNOWN",
-                    SemanticType: c.SemanticType,
-                    NullCount: c.NullCount,
-                    DistinctCount: c.DistinctCount,
-                    DistinctCapped: false,
-                    SampleValues: ParseSampleArray(c.SampleValuesJson)))
-                .ToList())).ToList();
-    }
-
-    private static string[] ParseSampleArray(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<string>();
-        try { return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>(); }
-        catch { return Array.Empty<string>(); }
-    }
 
     private static object? ParseSampleValues(string? json)
     {
@@ -533,11 +395,6 @@ public class DatasetService(
     private sealed record ColumnRow(
         Guid DatasetTableId, int OrdinalPosition, string? OriginalHeader, string NormalizedName,
         string? DisplayName, string? InferredType, string? SemanticType,
-        long NullCount, long DistinctCount, string? SampleValuesJson);
-
-    private sealed record ManifestColumnRow(
-        Guid DatasetTableId, int Ordinal, string? OriginalHeader, string NormalizedName,
-        string? DisplayName, string[]? Aliases, string? InferredType, string? SemanticType,
         long NullCount, long DistinctCount, string? SampleValuesJson);
 }
 

@@ -11,6 +11,7 @@ public class ManifestGenerator
         DatasetRecord dataset,
         IReadOnlyList<ParsedTable> tables,
         IReadOnlyList<string> warnings,
+        IReadOnlyList<(string Kind, string Title, string Content)> pinnedKnowledge,
         CancellationToken ct = default)
     {
         var sb = new StringBuilder();
@@ -26,7 +27,7 @@ public class ManifestGenerator
 
         sb.AppendLine("## Business Knowledge / User-provided Notes");
         sb.AppendLine();
-        if (string.IsNullOrWhiteSpace(dataset.BusinessKnowledge))
+        if (pinnedKnowledge.Count == 0)
         {
             sb.AppendLine("No user-provided business knowledge has been added yet.");
         }
@@ -35,9 +36,15 @@ public class ManifestGenerator
             sb.AppendLine("The following notes were provided by the business user. Treat them as reference context only.");
             sb.AppendLine("They may be incomplete or incorrect. If the notes conflict with actual data, explain the conflict.");
             sb.AppendLine();
-            sb.AppendLine("```text");
-            sb.AppendLine(EscapeCodeFence(dataset.BusinessKnowledge));
-            sb.AppendLine("```");
+            foreach (var entry in pinnedKnowledge)
+            {
+                sb.AppendLine($"### {entry.Title}");
+                sb.AppendLine();
+                sb.AppendLine("```text");
+                sb.AppendLine(EscapeCodeFence(entry.Content));
+                sb.AppendLine("```");
+                sb.AppendLine();
+            }
         }
         sb.AppendLine();
 
