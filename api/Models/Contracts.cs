@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace ExcelDatasetManager.Api.Models;
 
 // ============================================================
@@ -25,6 +27,10 @@ public record UpdateBusinessKnowledgeRequest(string? BusinessKnowledge);
 public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
 public record OAuthApproveRequest(
     string? ClientId, string? RedirectUri, string? CodeChallenge, string? CodeChallengeMethod, string? State);
+
+public record CreateConnectionRequest(string? Name, string? Provider, JsonElement? Config);
+public record UpdateConnectionRequest(string? Name, JsonElement? Config);
+public record CreateExternalDatasetRequest(string? Name, string[]? Tables, bool? IncludeSamples);
 
 // ============================================================
 // Internal domain records
