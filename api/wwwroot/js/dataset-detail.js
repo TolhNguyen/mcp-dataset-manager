@@ -319,7 +319,7 @@ const Knowledge = {
         try {
             const qs = this.showArchived ? '?include_archived=true' : '';
             const result = await Api.get(`/api/datasets/${this.datasetId}/knowledge${qs}`);
-            this.entries = result.data || [];
+            this.entries = (result.data && result.data.entries) || [];
             this.render();
         } catch (err) {
             $('#knowledgeList').innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
@@ -364,7 +364,7 @@ const Knowledge = {
             return `
                 <div class="knowledge-entry" data-id="${id}" style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px">
                     <input type="text" class="knowledge-edit-title" value="${escapeHtml(entry.title)}" maxlength="200" />
-                    <textarea class="knowledge-edit-content" rows="3" maxlength="10000">${escapeHtml(entry.content)}</textarea>
+                    <textarea class="knowledge-edit-content" rows="3" maxlength="4000">${escapeHtml(entry.content)}</textarea>
                     <label><input type="checkbox" class="knowledge-edit-pinned" ${entry.pinned ? 'checked' : ''} /> Ghim</label>
                     <div class="knowledge-entry-actions" style="margin-top:8px">
                         <button data-action="save-edit" data-id="${id}">Lưu</button>
