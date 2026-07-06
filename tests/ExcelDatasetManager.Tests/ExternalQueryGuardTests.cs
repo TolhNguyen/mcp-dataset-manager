@@ -90,6 +90,11 @@ public class ExternalQueryGuardTests
     [InlineData("SELECT pg_sleep(10)")]
     [InlineData("DO $$ ... $$")]
     [InlineData("SET work_mem='1GB'")]
+    [InlineData("SELECT pg_sleep_for('5 minutes')")]
+    [InlineData("SELECT pg_sleep_until('tomorrow')")]
+    [InlineData("SELECT pg_read_binary_file('/etc/passwd')")]
+    [InlineData("SELECT * FROM dblink_connect('host=evil')")]
+    [InlineData("SELECT dblink_exec('...', 'DELETE FROM t')")]
     public void Rejects_postgresql_specific(string sql)
     {
         var result = ExternalQueryGuard.Validate(sql, ExternalDbProviders.PostgreSql);

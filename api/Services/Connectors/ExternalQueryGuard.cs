@@ -32,6 +32,10 @@ public static class ExternalQueryGuard
 
     private static readonly Regex MsSqlProcRegex = new(@"\b(xp|sp)_[a-z0-9_]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    private static readonly Regex PostgreSqlDangerousFunctionRegex = new(
+        @"\b(pg_sleep|pg_read_file|pg_read_binary_file|pg_ls_dir|dblink|lo_import|lo_export)[a-z0-9_]*",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     public static QueryValidationResult Validate(string? sql, string provider)
     {
         if (string.IsNullOrWhiteSpace(sql))
@@ -87,6 +91,11 @@ public static class ExternalQueryGuard
         if (provider == ExternalDbProviders.MsSql && MsSqlProcRegex.IsMatch(scrubbed))
         {
             return QueryValidationResult.Fail("NON_READONLY_SQL", "Extended/system stored procedures are not allowed.");
+        }
+
+        if (provider == ExternalDbProviders.PostgreSql && PostgreSqlDangerousFunctionRegex.IsMatch(scrubbed))
+        {
+            return QueryValidationResult.Fail("NON_READONLY_SQL", "Dangerous PostgreSQL function is not allowed.");
         }
 
         // Return the original SQL (not the scrubbed version) so the target database sees the user's exact intent.
