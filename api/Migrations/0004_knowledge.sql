@@ -16,14 +16,14 @@ CREATE TABLE IF NOT EXISTS dataset_knowledge_entries (
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_dataset ON dataset_knowledge_entries(dataset_id) WHERE archived_at IS NULL;
--- NOTE: unaccent() is not IMMUTABLE by default, so this expression index can fail to create on some
--- Postgres setups ("functions in index expression must be marked IMMUTABLE"). If MigrationRunner
--- throws on this statement during e2e testing, fall back to:
---   CREATE INDEX IF NOT EXISTS idx_knowledge_search ON dataset_knowledge_entries
---       USING gin (lower(title || ' ' || content) gin_trgm_ops);
--- (search queries still apply unaccent() at query time; the index just pre-filters on lowercased trigrams.)
+-- NOTE: unaccent() is NOT IMMUTABLE, so it cannot appear in an expression index
+-- ("functions in index expression must be marked IMMUTABLE", SQLSTATE 42P17 — confirmed at e2e).
+-- We index on lower()-only trigrams (lower IS immutable); search queries still apply unaccent()
+-- at query time for accent-insensitive matching. The real per-dataset selectivity comes from the
+-- idx_knowledge_dataset partial index above (≤200 active rows/dataset), so a lowercased-trigram
+-- prefilter is sufficient here.
 CREATE INDEX IF NOT EXISTS idx_knowledge_search ON dataset_knowledge_entries
-    USING gin (unaccent(lower(title || ' ' || content)) gin_trgm_ops);
+    USING gin (lower(title || ' ' || content) gin_trgm_ops);
 
 CREATE TABLE IF NOT EXISTS dataset_knowledge_revisions (
     id UUID PRIMARY KEY,

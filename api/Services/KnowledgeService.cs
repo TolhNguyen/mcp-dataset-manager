@@ -236,7 +236,7 @@ public class KnowledgeService(NpgsqlDataSource dataSource)
         var rows = (await conn.QueryAsync<SearchRow>("""
             SELECT e.id AS Id, e.dataset_id AS DatasetId, e.kind AS Kind, e.title AS Title, e.content AS Content,
                    e.source AS Source, e.pinned AS Pinned,
-                   similarity(unaccent(lower(e.title || ' ' || e.content)), unaccent(lower(@Q))) AS Score
+                   similarity(unaccent(lower(e.title || ' ' || e.content)), unaccent(lower(@Q)))::double precision AS Score
             FROM dataset_knowledge_entries e
             WHERE e.dataset_id = ANY(@DatasetIds) AND e.archived_at IS NULL
               AND (unaccent(lower(e.title || ' ' || e.content)) % unaccent(lower(@Q))
