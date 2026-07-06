@@ -43,4 +43,12 @@ public class MigrationScriptLoaderTests
         Assert.Contains("can_write", m4.Sql);
         Assert.Contains("DROP COLUMN IF EXISTS business_knowledge", m4.Sql);
     }
+
+    [Fact]
+    public void Loads_context_migration()
+    {
+        var m5 = MigrationScriptLoader.LoadAll(typeof(MigrationRunner).Assembly).Single(s => s.Version == 5);
+        Assert.Contains("ADD COLUMN IF NOT EXISTS alias", m5.Sql);
+        Assert.Contains("dataset_ids UUID[]", m5.Sql);
+    }
 }
