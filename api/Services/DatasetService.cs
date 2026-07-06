@@ -67,7 +67,8 @@ public class DatasetService(
                    total_rows AS TotalRows,
                    status AS Status,
                    error_message AS ErrorMessage,
-                   created_at AS CreatedAt
+                   created_at AS CreatedAt,
+                   source_kind AS SourceKind
             FROM datasets
             WHERE user_id = @UserId
             ORDER BY created_at DESC
@@ -76,7 +77,7 @@ public class DatasetService(
         var items = rows.Select(r => new DatasetListItem(
             r.DatasetId, r.Name, r.OriginalFileName, r.FileType, r.FileSizeBytes,
             r.TableCount, r.TotalRows, r.Status, r.ErrorMessage, r.CreatedAt,
-            BuildActions(r.DatasetId))).ToList();
+            BuildActions(r.DatasetId), r.SourceKind)).ToList();
 
         return new DatasetListPayload(
             new DatasetLimit(maxDatasets, used, Math.Max(0, maxDatasets - used), used < maxDatasets),
@@ -525,7 +526,8 @@ public class DatasetService(
 
     private sealed record DatasetListRow(
         Guid DatasetId, string Name, string OriginalFileName, string FileType, long FileSizeBytes,
-        int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt);
+        int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt,
+        string SourceKind);
 
     private sealed record TableRow(Guid Id, string TableName, string SourceName, string SourceType, long RowCount, int ColumnCount);
     private sealed record ColumnRow(
@@ -546,7 +548,7 @@ public class DatasetService(
 public record DatasetListItem(
     Guid DatasetId, string Name, string OriginalFileName, string FileType, long FileSizeBytes,
     int TableCount, long TotalRows, string Status, string? ErrorMessage, DateTime CreatedAt,
-    object Actions);
+    object Actions, string SourceKind);
 
 public record DatasetLimit(int MaxDatasets, int Used, int Remaining, bool CanUpload);
 

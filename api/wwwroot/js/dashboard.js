@@ -47,6 +47,10 @@ const Dashboard = {
                 ? `<div class="error">${escapeHtml(item.error_message)}</div>`
                 : '';
 
+            const sourceBadge = item.source_kind === 'external_db'
+                ? `🗄 ${escapeHtml(item.file_type)}`
+                : `📄 ${escapeHtml(item.file_type)}`;
+
             return `
             <div class="dataset-item" data-id="${item.dataset_id}">
                 <div class="dataset-head">
@@ -61,6 +65,7 @@ const Dashboard = {
                             · ${item.total_rows.toLocaleString()} dòng
                             · ${formatDate(item.created_at)}
                         </div>
+                        <span class="badge badge-source">${sourceBadge}</span>
                         <span class="badge ${statusClass}">${escapeHtml(item.status)}</span>
                     </div>
                     <div class="dataset-actions">
