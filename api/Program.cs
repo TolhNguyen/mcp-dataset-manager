@@ -153,6 +153,16 @@ builder.Services.AddAuthorization(options =>
         policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
         policy.RequireAuthenticatedUser();
     });
+
+    // "KnowledgeWrite" — accepts JWT and API key (PAT or dataset-scoped), but dataset-scoped
+    // keys only pass if their can_write claim is "true". JWT sessions and PATs are implicitly
+    // full-write. See ClaimsPrincipalExtensions.CanWriteKnowledge.
+    options.AddPolicy("KnowledgeWrite", policy =>
+    {
+        policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationOptions.SchemeName);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx => ctx.User.CanWriteKnowledge());
+    });
 });
 
 // ============================================================

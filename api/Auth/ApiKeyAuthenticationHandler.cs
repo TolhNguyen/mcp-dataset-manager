@@ -28,7 +28,10 @@ public class ApiKeyAuthenticationOptions : AuthenticationSchemeOptions
 ///                    claims. The query endpoint enforces dataset_id matches the URL.
 ///
 /// On success, the principal carries an <c>auth_method</c> claim ("user_api_key" or
-/// "dataset_api_key") and a <c>dataset_id</c> claim only for dataset-scoped keys.
+/// "dataset_api_key") and, only for dataset-scoped keys, a <c>dataset_id</c> claim plus
+/// a <c>can_write</c> claim ("true"/"false", see <c>dataset_api_keys.can_write</c>) and a
+/// <c>key_name</c> claim. PATs and JWT sessions are implicitly full-write and never carry
+/// a <c>can_write</c> claim.
 /// </summary>
 public class ApiKeyAuthenticationHandler(
     IOptionsMonitor<ApiKeyAuthenticationOptions> options,
@@ -86,7 +89,8 @@ public class ApiKeyAuthenticationHandler(
 
         var datasetRow = await conn.QuerySingleOrDefaultAsync<DatasetKeyRow>(
             """
-            SELECT id AS Id, dataset_id AS DatasetId, user_id AS UserId, revoked_at AS RevokedAt
+            SELECT id AS Id, dataset_id AS DatasetId, user_id AS UserId, revoked_at AS RevokedAt,
+                   can_write AS CanWrite, name AS Name
             FROM dataset_api_keys
             WHERE key_hash = @KeyHash
             """, new { KeyHash = hash });
@@ -103,7 +107,9 @@ public class ApiKeyAuthenticationHandler(
             new Claim(ClaimTypes.NameIdentifier, datasetRow.UserId.ToString()),
             new Claim("sub", datasetRow.UserId.ToString()),
             new Claim(ClaimsPrincipalExtensions.DatasetIdClaim, datasetRow.DatasetId.ToString()),
-            new Claim("auth_method", "dataset_api_key")
+            new Claim("auth_method", "dataset_api_key"),
+            new Claim(ClaimsPrincipalExtensions.CanWriteClaim, datasetRow.CanWrite ? "true" : "false"),
+            new Claim(ClaimsPrincipalExtensions.KeyNameClaim, datasetRow.Name)
         };
 
         return AuthSuccess(dsClaims);
@@ -154,5 +160,5 @@ public class ApiKeyAuthenticationHandler(
     }
 
     private sealed record UserKeyRow(Guid Id, Guid UserId, DateTime? RevokedAt);
-    private sealed record DatasetKeyRow(Guid Id, Guid DatasetId, Guid UserId, DateTime? RevokedAt);
+    private sealed record DatasetKeyRow(Guid Id, Guid DatasetId, Guid UserId, DateTime? RevokedAt, bool CanWrite, string Name);
 }

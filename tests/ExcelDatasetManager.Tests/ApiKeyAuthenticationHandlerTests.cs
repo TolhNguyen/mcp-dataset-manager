@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text.Encodings.Web;
 using ExcelDatasetManager.Api.Auth;
 using Microsoft.AspNetCore.Authentication;
@@ -59,5 +60,64 @@ public class ApiKeyAuthenticationHandlerTests
         public ApiKeyAuthenticationOptions CurrentValue => options;
         public ApiKeyAuthenticationOptions Get(string? name) => options;
         public IDisposable? OnChange(Action<ApiKeyAuthenticationOptions, string?> listener) => null!;
+    }
+
+    // ============================================================
+    // ClaimsPrincipalExtensions.CanWriteKnowledge — pure, no DB needed.
+    // ============================================================
+
+    [Fact]
+    public void CanWriteKnowledge_true_for_jwt_principal_with_no_auth_method_claim()
+    {
+        // JWT-authenticated principals never get an auth_method claim — that claim is only
+        // set by ApiKeyAuthenticationHandler. Absence of the claim means "JWT", full-write.
+        var principal = BuildPrincipal(authMethod: null, canWrite: null);
+
+        Assert.True(principal.CanWriteKnowledge());
+    }
+
+    [Fact]
+    public void CanWriteKnowledge_true_for_user_api_key_pat()
+    {
+        var principal = BuildPrincipal(authMethod: "user_api_key", canWrite: null);
+
+        Assert.True(principal.CanWriteKnowledge());
+    }
+
+    [Fact]
+    public void CanWriteKnowledge_false_for_dataset_api_key_without_write_flag()
+    {
+        var principal = BuildPrincipal(authMethod: "dataset_api_key", canWrite: "false");
+
+        Assert.False(principal.CanWriteKnowledge());
+    }
+
+    [Fact]
+    public void CanWriteKnowledge_true_for_dataset_api_key_with_write_flag()
+    {
+        var principal = BuildPrincipal(authMethod: "dataset_api_key", canWrite: "true");
+
+        Assert.True(principal.CanWriteKnowledge());
+    }
+
+    private static ClaimsPrincipal BuildPrincipal(string? authMethod, string? canWrite)
+    {
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.NameIdentifier, Guid.NewGuid().ToString())
+        };
+
+        if (authMethod is not null)
+        {
+            claims.Add(new Claim("auth_method", authMethod));
+        }
+
+        if (canWrite is not null)
+        {
+            claims.Add(new Claim(ClaimsPrincipalExtensions.CanWriteClaim, canWrite));
+        }
+
+        var identity = new ClaimsIdentity(claims, "TestAuth");
+        return new ClaimsPrincipal(identity);
     }
 }

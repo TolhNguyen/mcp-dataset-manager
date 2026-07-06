@@ -22,7 +22,7 @@ public record QueryOptions(
     string? ResponseMode);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
 
-public record CreateDatasetApiKeyRequest(string Name);
+public record CreateDatasetApiKeyRequest(string Name, bool? CanWrite = null);
 public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
 public record OAuthApproveRequest(
     string? ClientId, string? RedirectUri, string? CodeChallenge, string? CodeChallengeMethod, string? State);
