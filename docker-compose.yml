@@ -33,6 +33,7 @@ services:
       Jwt__Issuer: ${JWT_ISSUER:-ExcelDatasetManager}
       Jwt__Audience: ${JWT_AUDIENCE:-ExcelDatasetManagerFrontend}
       Encryption__MasterKey: ${EDM_ENCRYPTION_KEY}
+      Oauth__PublicUrl: ${EDM_PUBLIC_URL:-http://localhost}
       Cors__AllowedOrigins__0: ${CORS_ALLOWED_ORIGIN:-*}
       Upload__MaxFileSizeMb: ${MAX_UPLOAD_MB:-100}
       Query__DefaultLimit: ${QUERY_DEFAULT_LIMIT:-100}
@@ -60,6 +61,7 @@ services:
       MCP_PORT: 5848
       MCP_RATE_LIMIT_PER_MINUTE: ${MCP_RATE_LIMIT_PER_MINUTE:-180}
       EDM_API_URL: http://api:8080
+      EDM_PUBLIC_URL: ${EDM_PUBLIC_URL:-http://localhost}
       CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-*}
     ports:
       - "${MCP_PORT:-5848}:5848"
