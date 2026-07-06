@@ -202,7 +202,7 @@ builder.WebHost.ConfigureKestrel(o =>
 // ============================================================
 
 builder.Services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(connectionString));
-builder.Services.AddScoped<DatabaseInitializer>();
+builder.Services.AddScoped<MigrationRunner>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DatasetService>();
 builder.Services.AddScoped<DatasetApiKeyService>();
@@ -276,7 +276,7 @@ app.UseAuthorization();
 
 using (var scope = app.Services.CreateScope())
 {
-    await scope.ServiceProvider.GetRequiredService<DatabaseInitializer>().InitializeAsync();
+    await scope.ServiceProvider.GetRequiredService<MigrationRunner>().RunAsync();
 
     var dataSource = scope.ServiceProvider.GetRequiredService<NpgsqlDataSource>();
     var parsingQueue = scope.ServiceProvider.GetRequiredService<ParsingJobQueue>();
