@@ -23,7 +23,7 @@ public class BigQueryDbConnector(ILogger<BigQueryDbConnector> logger) : IExterna
     {
         try
         {
-            var client = CreateClient(config);
+            using var client = CreateClient(config);
             await client.ExecuteQueryAsync(
                 "SELECT 1",
                 parameters: null,
@@ -42,7 +42,7 @@ public class BigQueryDbConnector(ILogger<BigQueryDbConnector> logger) : IExterna
 
     public async Task<List<ExternalTableInfo>> ListTablesAsync(DbConnectionConfig config, CancellationToken ct)
     {
-        var client = CreateClient(config);
+        using var client = CreateClient(config);
         var result = new List<ExternalTableInfo>();
 
         await foreach (var table in client.ListTablesAsync(config.BigQueryDataset).WithCancellation(ct))
@@ -74,7 +74,7 @@ public class BigQueryDbConnector(ILogger<BigQueryDbConnector> logger) : IExterna
 
         try
         {
-            var client = CreateClient(config);
+            using var client = CreateClient(config);
             var results = await client.ExecuteQueryAsync(
                 $"SELECT * FROM {quoted} LIMIT 2",
                 parameters: null,
@@ -106,7 +106,7 @@ public class BigQueryDbConnector(ILogger<BigQueryDbConnector> logger) : IExterna
 
     public async Task<ExternalQueryResult> ExecuteQueryAsync(DbConnectionConfig config, string sql, int maxRows, int timeoutSeconds, CancellationToken ct)
     {
-        var client = CreateClient(config);
+        using var client = CreateClient(config);
         var results = await client.ExecuteQueryAsync(
             sql,
             parameters: null,
