@@ -52,11 +52,13 @@ const ApiKeys = {
     async createKey(e) {
         e.preventDefault();
         const form = e.currentTarget;
-        const name = new FormData(form).get('name');
+        const fd = new FormData(form);
+        const name = fd.get('name');
+        const canWrite = fd.get('can_write') === 'on';
         const resultBox = $('#newKeyResult');
 
         try {
-            const response = await Api.post(`/api/datasets/${this.datasetId}/api-keys`, { name });
+            const response = await Api.post(`/api/datasets/${this.datasetId}/api-keys`, { name, can_write: canWrite });
             const key = response.data.api_key;
 
             resultBox.hidden = false;

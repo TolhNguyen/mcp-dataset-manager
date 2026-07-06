@@ -22,44 +22,42 @@
         <p class="muted">Đang tải dataset…</p>
     </section>
 
-    <section class="card" id="businessKnowledgeCard" hidden>
+    <section class="card" id="knowledgeCard" hidden>
         <header class="card-head">
             <div>
-                <h2>Gợi ý dữ liệu</h2>
+                <h2>Tri thức dataset</h2>
                 <p class="muted">
-                    Nhập các quy ước, công thức, định nghĩa hoặc lưu ý nghiệp vụ để Claude tham khảo khi phân tích dữ liệu.
-                    Nội dung này chỉ là tham khảo, không phải nguồn sự thật tuyệt đối.
+                    Ghi chú, quy tắc nghiệp vụ, ý nghĩa cột, công thức... để Claude tham khảo khi phân tích dữ liệu.
+                    👤 = do bạn ghi, 🤖 = do AI ghi. Nội dung này chỉ là tham khảo, không phải nguồn sự thật tuyệt đối.
                 </p>
             </div>
         </header>
-        <textarea id="businessKnowledgeInput" rows="8" maxlength="10000" placeholder="Ví dụ:
-- Chỉ tính doanh thu với đơn có status = Completed.
-- Đơn Cancelled / Failed không tính vào doanh thu.
-- Cột revenue là doanh thu sau giảm giá, chưa trừ phí sàn.
-- Cột order_code là mã đơn hàng.
-- Cột store_code là mã cửa hàng giao đi.
-- Nếu hỏi doanh thu theo ngày thì dùng cột created_at."></textarea>
-        <div class="chip-row" id="businessKnowledgeChips">
-            <button type="button" class="chip" data-template="Quy ước tính doanh thu:
-- Chỉ tính các dòng có ...
-- Không tính các dòng có ...
-- Cột doanh thu chính là ...">Thêm quy ước tính doanh thu</button>
-            <button type="button" class="chip" data-template="Ý nghĩa trạng thái đơn:
-- Completed: ...
-- Cancelled: ...
-- Failed: ...">Giải thích trạng thái đơn</button>
-            <button type="button" class="chip" data-template="Cột ngày chính:
-- Khi phân tích theo ngày, dùng cột ...
-- Múi giờ / quy ước ngày: ...">Chỉ định cột ngày chính</button>
-            <button type="button" class="chip" data-template="Dòng không nên tính:
-- Loại trừ các dòng có ...
-- Lý do: ...">Ghi chú dòng loại trừ</button>
+
+        <form id="newKnowledgeForm">
+            <div class="form-row">
+                <select name="kind" required>
+                    <option value="note">Ghi chú</option>
+                    <option value="column_meaning">Ý nghĩa cột</option>
+                    <option value="business_rule">Quy tắc nghiệp vụ</option>
+                    <option value="metric_definition">Định nghĩa chỉ số</option>
+                    <option value="join_hint">Gợi ý join</option>
+                    <option value="document">Tài liệu</option>
+                </select>
+                <input type="text" name="title" required maxlength="200" placeholder="Tiêu đề" style="flex:1" />
+            </div>
+            <textarea name="content" rows="3" maxlength="10000" placeholder="Nội dung..."></textarea>
+            <div class="form-row">
+                <label><input type="checkbox" name="pinned" /> Ghim</label>
+                <button type="submit">＋ Thêm</button>
+            </div>
+        </form>
+        <div id="knowledgeStatus" class="status-msg error" hidden></div>
+
+        <div class="form-row">
+            <label><input type="checkbox" id="showArchivedKnowledge" /> Hiện đã lưu trữ</label>
         </div>
-        <div class="form-row business-knowledge-actions">
-            <button id="saveBusinessKnowledgeBtn" type="button">Lưu</button>
-            <span id="businessKnowledgeSavedAt" class="muted"></span>
-        </div>
-        <div id="businessKnowledgeStatus" class="status-msg" hidden></div>
+
+        <div id="knowledgeList"></div>
     </section>
 
     <section class="card" id="tablesCard" hidden>
@@ -78,6 +76,7 @@
 
         <form id="newKeyForm" class="inline-form">
             <input type="text" name="name" required placeholder="Tên dễ nhớ, ví dụ: claude-desktop" />
+            <label><input type="checkbox" name="can_write" /> Cho phép AI ghi tri thức (can_write)</label>
             <button type="submit">Tạo API key</button>
         </form>
 

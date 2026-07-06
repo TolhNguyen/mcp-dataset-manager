@@ -153,6 +153,16 @@ builder.Services.AddAuthorization(options =>
         policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme);
         policy.RequireAuthenticatedUser();
     });
+
+    // "KnowledgeWrite" — accepts JWT and API key (PAT or dataset-scoped), but dataset-scoped
+    // keys only pass if their can_write claim is "true". JWT sessions and PATs are implicitly
+    // full-write. See ClaimsPrincipalExtensions.CanWriteKnowledge.
+    options.AddPolicy("KnowledgeWrite", policy =>
+    {
+        policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationOptions.SchemeName);
+        policy.RequireAuthenticatedUser();
+        policy.RequireAssertion(ctx => ctx.User.CanWriteKnowledge());
+    });
 });
 
 // ============================================================
@@ -228,6 +238,7 @@ builder.Services.AddSingleton<IExternalDbConnector, BigQueryDbConnector>();
 builder.Services.AddScoped<DbConnectionService>();
 builder.Services.AddScoped<ExternalSchemaService>();
 builder.Services.AddScoped<ExternalQueryService>();
+builder.Services.AddScoped<KnowledgeService>();
 builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<SecretProtector>();
@@ -341,6 +352,7 @@ app.MapApiKeyEndpoints();
 app.MapQueryEndpoints();
 app.MapOAuthEndpoints();
 app.MapConnectionEndpoints();
+app.MapKnowledgeEndpoints();
 
 app.Run();
 

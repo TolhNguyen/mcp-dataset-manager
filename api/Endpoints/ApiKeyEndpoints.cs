@@ -15,7 +15,7 @@ public static class ApiKeyEndpoints
             async (Guid datasetId, CreateDatasetApiKeyRequest req, ClaimsPrincipal principal, DatasetApiKeyService svc, CancellationToken ct) =>
         {
             var userId = principal.GetUserId()!.Value;
-            var result = await svc.CreateAsync(userId, datasetId, req.Name, ct);
+            var result = await svc.CreateAsync(userId, datasetId, req.Name, req.CanWrite ?? false, ct);
             return result.Success
                 ? Results.Ok(new { success = true, data = result.Data })
                 : Results.BadRequest(new { success = false, error = result.Error });

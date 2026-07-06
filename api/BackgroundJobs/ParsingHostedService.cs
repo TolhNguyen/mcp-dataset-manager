@@ -160,7 +160,7 @@ public class ParsingHostedService(
             };
 
             var manifestPath = storage.GetManifestPath(job.UserId, job.DatasetId);
-            await manifest.GenerateAsync(manifestPath, updatedDataset, parsed.Tables, parsed.Warnings, ct);
+            await manifest.GenerateAsync(manifestPath, updatedDataset, parsed.Tables, parsed.Warnings, [], ct);
 
             // Clean up temp CSVs.
             storage.DeleteTempDirectory(job.UserId, job.DatasetId);

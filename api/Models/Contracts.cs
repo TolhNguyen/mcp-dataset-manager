@@ -22,8 +22,7 @@ public record QueryOptions(
     string? ResponseMode);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
 
-public record CreateDatasetApiKeyRequest(string Name);
-public record UpdateBusinessKnowledgeRequest(string? BusinessKnowledge);
+public record CreateDatasetApiKeyRequest(string Name, bool? CanWrite = null);
 public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
 public record OAuthApproveRequest(
     string? ClientId, string? RedirectUri, string? CodeChallenge, string? CodeChallengeMethod, string? State);
@@ -51,8 +50,6 @@ public record DatasetRecord(
     string? ErrorMessage,
     DateTime CreatedAt,
     DateTime? ProcessedAt,
-    string BusinessKnowledge,
-    DateTime? BusinessKnowledgeUpdatedAt,
     string SourceKind,
     Guid? ConnectionId
 );

@@ -34,4 +34,13 @@ public class MigrationScriptLoaderTests
         Assert.Contains("CREATE TABLE IF NOT EXISTS db_connections", m3.Sql);
         Assert.Contains("max_datasets", m3.Sql);
     }
+
+    [Fact]
+    public void Loads_knowledge_migration()
+    {
+        var m4 = MigrationScriptLoader.LoadAll(typeof(MigrationRunner).Assembly).Single(s => s.Version == 4);
+        Assert.Contains("dataset_knowledge_entries", m4.Sql);
+        Assert.Contains("can_write", m4.Sql);
+        Assert.Contains("DROP COLUMN IF EXISTS business_knowledge", m4.Sql);
+    }
 }
