@@ -1,7 +1,6 @@
 const DatasetDetail = {
     datasetId: null,
     pollTimer: null,
-    businessKnowledgeDirty: false,
 
     async init() {
         if (!AuthPage.requireAuth()) return;
@@ -14,20 +13,6 @@ const DatasetDetail = {
         }
 
         $('#runQueryBtn').addEventListener('click', () => this.runQuery());
-        $('#saveBusinessKnowledgeBtn').addEventListener('click', () => this.saveBusinessKnowledge());
-        $('#businessKnowledgeInput').addEventListener('input', () => {
-            this.businessKnowledgeDirty = true;
-        });
-        $('#businessKnowledgeChips').addEventListener('click', (event) => {
-            const btn = event.target.closest('button[data-template]');
-            if (!btn) return;
-            this.appendBusinessKnowledgeTemplate(btn.dataset.template || '');
-        });
-        window.addEventListener('beforeunload', (event) => {
-            if (!this.businessKnowledgeDirty) return;
-            event.preventDefault();
-            event.returnValue = '';
-        });
 
         await this.refresh();
     },
@@ -36,9 +21,9 @@ const DatasetDetail = {
         try {
             const result = await Api.get(`/api/datasets/${this.datasetId}`);
             this.renderDataset(result.dataset);
-            this.renderBusinessKnowledge(result.dataset);
             this.renderTables(result.tables);
             await ApiKeys.refresh(this.datasetId);
+            await Knowledge.refresh(this.datasetId);
 
             if (result.dataset.status === 'processing') {
                 this.pollTimer = setTimeout(() => this.refresh(), 3000);
@@ -93,58 +78,6 @@ const DatasetDetail = {
         $('#tablesCard').hidden = !isReady;
         $('#apiKeysCard').hidden = !isReady;
         $('#queryCard').hidden = !isReady;
-    },
-
-    renderBusinessKnowledge(d) {
-        const card = $('#businessKnowledgeCard');
-        const input = $('#businessKnowledgeInput');
-        const savedAt = $('#businessKnowledgeSavedAt');
-
-        card.hidden = false;
-        if (!this.businessKnowledgeDirty) {
-            input.value = d.business_knowledge || '';
-        }
-
-        savedAt.textContent = d.business_knowledge_updated_at
-            ? `Đã lưu: ${formatDate(d.business_knowledge_updated_at)}`
-            : 'Chưa lưu gợi ý nào';
-    },
-
-    appendBusinessKnowledgeTemplate(template) {
-        const input = $('#businessKnowledgeInput');
-        const prefix = input.value.trim().length > 0 ? '\n\n' : '';
-        input.value += prefix + template;
-        input.focus();
-        this.businessKnowledgeDirty = true;
-    },
-
-    async saveBusinessKnowledge() {
-        const input = $('#businessKnowledgeInput');
-        const button = $('#saveBusinessKnowledgeBtn');
-        const status = $('#businessKnowledgeStatus');
-
-        button.disabled = true;
-        status.hidden = false;
-        status.className = 'status-msg info';
-        status.textContent = 'Đang lưu...';
-
-        try {
-            const result = await Api.put(`/api/datasets/${this.datasetId}/business-knowledge`, {
-                business_knowledge: input.value
-            });
-
-            this.businessKnowledgeDirty = false;
-            status.className = 'status-msg success';
-            status.textContent = result.data.manifest_updated
-                ? 'Đã lưu và cập nhật manifest.md.'
-                : 'Đã lưu. Manifest sẽ được cập nhật lại khi metadata sẵn sàng.';
-            $('#businessKnowledgeSavedAt').textContent = `Đã lưu: ${formatDate(result.data.business_knowledge_updated_at)}`;
-        } catch (err) {
-            status.className = 'status-msg error';
-            status.textContent = err.message || 'Không lưu được gợi ý dữ liệu.';
-        } finally {
-            button.disabled = false;
-        }
     },
 
     renderTables(tables) {
@@ -350,3 +283,188 @@ function getDownloadFileNameFromResponse(response, fallbackFileName) {
     const quoted = header.match(/filename="?([^";]+)"?/i);
     return quoted ? quoted[1] : fallbackFileName;
 }
+
+const KNOWLEDGE_KIND_LABELS = {
+    note: 'Ghi chú',
+    column_meaning: 'Ý nghĩa cột',
+    business_rule: 'Quy tắc nghiệp vụ',
+    metric_definition: 'Định nghĩa chỉ số',
+    join_hint: 'Gợi ý join',
+    document: 'Tài liệu'
+};
+
+const Knowledge = {
+    datasetId: null,
+    entries: [],
+    showArchived: false,
+    editingId: null,
+
+    async refresh(datasetId) {
+        this.datasetId = datasetId;
+
+        if (!this._bound) {
+            $('#newKnowledgeForm').addEventListener('submit', (e) => this.createEntry(e));
+            $('#showArchivedKnowledge').addEventListener('change', (e) => {
+                this.showArchived = e.target.checked;
+                this.load();
+            });
+            this._bound = true;
+        }
+
+        $('#knowledgeCard').hidden = false;
+        await this.load();
+    },
+
+    async load() {
+        try {
+            const qs = this.showArchived ? '?include_archived=true' : '';
+            const result = await Api.get(`/api/datasets/${this.datasetId}/knowledge${qs}`);
+            this.entries = result.data || [];
+            this.render();
+        } catch (err) {
+            $('#knowledgeList').innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    render() {
+        const wrap = $('#knowledgeList');
+        if (this.entries.length === 0) {
+            wrap.innerHTML = '<p class="muted">Chưa có tri thức nào.</p>';
+            return;
+        }
+
+        const groups = {};
+        this.entries.forEach(entry => {
+            const key = entry.kind || 'note';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(entry);
+        });
+
+        wrap.innerHTML = Object.keys(groups).map(kind => `
+            <div class="knowledge-group" style="margin-top:12px">
+                <h3>${escapeHtml(KNOWLEDGE_KIND_LABELS[kind] || kind)}</h3>
+                ${groups[kind].map(e => this.renderEntry(e)).join('')}
+            </div>
+        `).join('');
+
+        wrap.querySelectorAll('button[data-action]').forEach(btn => {
+            const action = btn.dataset.action;
+            if (action === 'pin') btn.addEventListener('click', () => this.togglePin(btn.dataset.id));
+            if (action === 'edit') btn.addEventListener('click', () => this.startEdit(btn.dataset.id));
+            if (action === 'archive') btn.addEventListener('click', () => this.archiveEntry(btn.dataset.id));
+            if (action === 'save-edit') btn.addEventListener('click', () => this.saveEdit(btn));
+            if (action === 'cancel-edit') btn.addEventListener('click', () => { this.editingId = null; this.render(); });
+        });
+    },
+
+    renderEntry(entry) {
+        const id = escapeHtml(entry.id);
+
+        if (this.editingId === entry.id) {
+            return `
+                <div class="knowledge-entry" data-id="${id}" style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px">
+                    <input type="text" class="knowledge-edit-title" value="${escapeHtml(entry.title)}" maxlength="200" />
+                    <textarea class="knowledge-edit-content" rows="3" maxlength="10000">${escapeHtml(entry.content)}</textarea>
+                    <label><input type="checkbox" class="knowledge-edit-pinned" ${entry.pinned ? 'checked' : ''} /> Ghim</label>
+                    <div class="knowledge-entry-actions" style="margin-top:8px">
+                        <button data-action="save-edit" data-id="${id}">Lưu</button>
+                        <button type="button" class="btn-link" data-action="cancel-edit" data-id="${id}">Hủy</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        const sourceBadge = entry.source === 'ai' ? '🤖' : '👤';
+        const sourceTitle = entry.source === 'ai' ? 'Do AI ghi' : 'Do người dùng ghi';
+        const pinTag = entry.pinned ? '<span title="Đã ghim">📌</span>' : '';
+        const archivedTag = entry.archived_at ? '<span class="badge badge-failed">đã lưu trữ</span>' : '';
+
+        const actions = entry.archived_at ? '' : `
+            <div class="knowledge-entry-actions" style="margin-top:6px">
+                <button type="button" class="btn-link" data-action="pin" data-id="${id}">${entry.pinned ? 'Bỏ ghim' : 'Ghim'}</button>
+                <button type="button" class="btn-link" data-action="edit" data-id="${id}">Sửa</button>
+                <button type="button" class="btn-danger" data-action="archive" data-id="${id}">Lưu trữ</button>
+            </div>`;
+
+        return `
+            <div class="knowledge-entry" data-id="${id}" style="border:1px solid var(--border);border-radius:6px;padding:10px;margin-top:8px">
+                <div class="knowledge-entry-head">
+                    <strong>${escapeHtml(entry.title)}</strong>
+                    <span title="${sourceTitle}">${sourceBadge}</span>
+                    ${pinTag}
+                    ${archivedTag}
+                </div>
+                <div class="knowledge-entry-content" style="white-space:pre-wrap;margin-top:6px">${escapeHtml(entry.content)}</div>
+                <div class="muted knowledge-entry-meta" style="margin-top:6px">
+                    Tạo bởi ${escapeHtml(entry.created_by || '—')} · ${formatDate(entry.created_at)}
+                </div>
+                ${actions}
+            </div>
+        `;
+    },
+
+    async createEntry(e) {
+        e.preventDefault();
+        const form = e.currentTarget;
+        const fd = new FormData(form);
+        const status = $('#knowledgeStatus');
+
+        try {
+            await Api.post(`/api/datasets/${this.datasetId}/knowledge`, {
+                kind: fd.get('kind'),
+                title: fd.get('title'),
+                content: fd.get('content') || '',
+                pinned: fd.get('pinned') === 'on'
+            });
+            form.reset();
+            status.hidden = true;
+            await this.load();
+        } catch (err) {
+            status.hidden = false;
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Không thêm được tri thức.';
+        }
+    },
+
+    async togglePin(id) {
+        const entry = this.entries.find(x => x.id === id);
+        if (!entry) return;
+        try {
+            await Api.put(`/api/datasets/${this.datasetId}/knowledge/${id}`, { pinned: !entry.pinned });
+            await this.load();
+        } catch (err) {
+            alert(err.message || 'Không cập nhật được.');
+        }
+    },
+
+    startEdit(id) {
+        this.editingId = id;
+        this.render();
+    },
+
+    async saveEdit(btn) {
+        const id = btn.dataset.id;
+        const container = btn.closest('.knowledge-entry');
+        const title = container.querySelector('.knowledge-edit-title').value;
+        const content = container.querySelector('.knowledge-edit-content').value;
+        const pinned = container.querySelector('.knowledge-edit-pinned').checked;
+
+        try {
+            await Api.put(`/api/datasets/${this.datasetId}/knowledge/${id}`, { title, content, pinned });
+            this.editingId = null;
+            await this.load();
+        } catch (err) {
+            alert(err.message || 'Không lưu được.');
+        }
+    },
+
+    async archiveEntry(id) {
+        if (!confirm('Lưu trữ tri thức này?')) return;
+        try {
+            await Api.delete(`/api/datasets/${this.datasetId}/knowledge/${id}`);
+            await this.load();
+        } catch (err) {
+            alert(err.message || 'Không lưu trữ được.');
+        }
+    }
+};
