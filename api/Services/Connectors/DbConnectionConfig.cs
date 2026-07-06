@@ -15,6 +15,19 @@ public record DbConnectionConfig(
 {
     private const long DefaultMaxBytesBilled = 1_073_741_824L; // 1GB
 
+    /// <summary>
+    /// Redacts this config's secrets (password, service-account JSON) from an arbitrary text —
+    /// used to scrub driver exception messages before they reach a response or log.
+    /// </summary>
+    public string Scrub(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return text ?? string.Empty;
+        var scrubbed = text;
+        if (!string.IsNullOrEmpty(Password)) scrubbed = scrubbed.Replace(Password, "***");
+        if (!string.IsNullOrEmpty(ServiceAccountJson)) scrubbed = scrubbed.Replace(ServiceAccountJson, "***");
+        return scrubbed;
+    }
+
     private static readonly JsonSerializerOptions StorageJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,

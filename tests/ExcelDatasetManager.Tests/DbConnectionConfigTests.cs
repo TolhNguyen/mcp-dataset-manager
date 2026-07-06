@@ -198,4 +198,26 @@ public class DbConnectionConfigTests
 
         Assert.Equal(config, roundTripped);
     }
+
+    [Fact]
+    public void Scrub_redacts_password_and_service_account_from_text()
+    {
+        var raw = Json("""{"host":"db","database":"d","username":"u","password":"S3cr3t!"}""");
+        var (config, _) = DbConnectionConfig.Parse(ExternalDbProviders.PostgreSql, raw);
+
+        var scrubbed = config!.Scrub("connection failed: password=S3cr3t! for user u");
+
+        Assert.DoesNotContain("S3cr3t!", scrubbed);
+        Assert.Contains("***", scrubbed);
+    }
+
+    [Fact]
+    public void Scrub_handles_null_and_empty()
+    {
+        var raw = Json("""{"host":"db","database":"d","username":"u","password":"p"}""");
+        var (config, _) = DbConnectionConfig.Parse(ExternalDbProviders.PostgreSql, raw);
+
+        Assert.Equal(string.Empty, config!.Scrub(null));
+        Assert.Equal(string.Empty, config.Scrub(""));
+    }
 }

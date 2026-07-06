@@ -33,7 +33,7 @@ public static class ExternalQueryGuard
     private static readonly Regex MsSqlProcRegex = new(@"\b(xp|sp)_[a-z0-9_]+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private static readonly Regex PostgreSqlDangerousFunctionRegex = new(
-        @"\b(pg_sleep|pg_read_file|pg_read_binary_file|pg_ls_dir|dblink|lo_import|lo_export)[a-z0-9_]*",
+        @"\b(pg_sleep|pg_read_file|pg_read_binary_file|pg_ls_dir|dblink|lo_import|lo_export|set_config|setval|nextval)[a-z0-9_]*",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static QueryValidationResult Validate(string? sql, string provider)

@@ -192,9 +192,18 @@ public class DbConnectionService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "TestAsync threw for connection {ConnectionId}", id);
-            result = new ConnectorTestResult(false, ex.Message, null);
+            // Never log the raw exception: a driver may echo the connection string / credentials.
+            var scrubbed = config.Scrub(ex.Message);
+            logger.LogWarning("TestAsync failed for connection {ConnectionId}: {Error}", id, scrubbed);
+            result = new ConnectorTestResult(false, scrubbed, null);
         }
+
+        // Scrub any secret a connector's own caught exception may have surfaced in its Error/Warning.
+        result = result with
+        {
+            Error = result.Error is null ? null : config.Scrub(result.Error),
+            Warning = result.Warning is null ? null : config.Scrub(result.Warning)
+        };
 
         var testedAt = DateTime.UtcNow;
         var status = result.Success ? "success" : "failed";

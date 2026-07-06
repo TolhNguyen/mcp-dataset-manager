@@ -95,6 +95,9 @@ public class ExternalQueryGuardTests
     [InlineData("SELECT pg_read_binary_file('/etc/passwd')")]
     [InlineData("SELECT * FROM dblink_connect('host=evil')")]
     [InlineData("SELECT dblink_exec('...', 'DELETE FROM t')")]
+    [InlineData("SELECT set_config('transaction_read_only', 'off', false)")]
+    [InlineData("SELECT setval('my_seq', 100)")]
+    [InlineData("SELECT nextval('my_seq')")]
     public void Rejects_postgresql_specific(string sql)
     {
         var result = ExternalQueryGuard.Validate(sql, ExternalDbProviders.PostgreSql);

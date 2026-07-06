@@ -215,7 +215,7 @@ public class ExternalQueryService(
             catch (Exception ex)
             {
                 sw.Stop();
-                var message = SanitizeExceptionMessage(ex.Message, config);
+                var message = config.Scrub(ex.Message);
 
                 await LogAsync(queryId, datasetId, userId, request.Sql, executedSql, "failed",
                     (int)sw.ElapsedMilliseconds, 0, null, null, ErrorCodes.ExternalQueryFailed, message);
@@ -252,23 +252,6 @@ public class ExternalQueryService(
 
     /// <summary>Strips any raw secret material (password / service account JSON) that might have leaked
     /// into a driver's exception message, e.g. via an echoed connection string.</summary>
-    private static string SanitizeExceptionMessage(string message, DbConnectionConfig config)
-    {
-        var sanitized = message;
-
-        if (!string.IsNullOrEmpty(config.Password))
-        {
-            sanitized = sanitized.Replace(config.Password, "***");
-        }
-
-        if (!string.IsNullOrEmpty(config.ServiceAccountJson))
-        {
-            sanitized = sanitized.Replace(config.ServiceAccountJson, "***");
-        }
-
-        return sanitized;
-    }
-
     private object BuildErrorResponse(Guid datasetId, Guid queryId, string submittedSql, string? executedSql,
         string engine, string code, string message, long elapsedMs)
     {
