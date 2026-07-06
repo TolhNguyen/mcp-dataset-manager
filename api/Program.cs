@@ -33,6 +33,14 @@ if (string.IsNullOrWhiteSpace(jwtKey) || jwtKey.Length < 32 || jwtKey.StartsWith
 var connectionString = builder.Configuration.GetConnectionString("Default")
     ?? throw new InvalidOperationException("ConnectionStrings:Default is required.");
 
+var encryptionKey = builder.Configuration["Encryption:MasterKey"];
+if (string.IsNullOrWhiteSpace(encryptionKey) || encryptionKey.Length < 32)
+{
+    throw new InvalidOperationException(
+        "Configuration Encryption:MasterKey must be set to a random secret of at least 32 characters. " +
+        "Set it via the EDM_ENCRYPTION_KEY environment variable.");
+}
+
 // ============================================================
 // JSON: snake_case across the wire for spec consistency
 // ============================================================
@@ -211,6 +219,7 @@ builder.Services.AddScoped<DuckDbQueryService>();
 builder.Services.AddScoped<FileParserService>();
 builder.Services.AddScoped<ManifestGenerator>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
+builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<FileStorageService>();
 builder.Services.AddSingleton<HeaderNormalizer>();
 builder.Services.AddSingleton<QueryValidator>();
