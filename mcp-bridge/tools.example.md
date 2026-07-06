@@ -248,6 +248,166 @@ params:
     required: true
 ```
 
+## get_dataset_knowledge
+
+```yaml
+type: tool
+name: get_dataset_knowledge
+description: |
+  Read the dataset's business-knowledge memory: notes, column meanings,
+  business rules, metric definitions, join hints, and documents that the user
+  or a previous conversation recorded. ALWAYS call this before analyzing a
+  dataset you haven't seen yet (right after get_dataset_schema) — pinned
+  entries especially may correct assumptions you'd otherwise make from column
+  names alone (e.g. what a column really means, or which metric formula the
+  business actually uses).
+connection: edm
+method: GET
+path: /api/datasets/{dataset_id}/knowledge
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_datasets.
+  include_archived:
+    in: query
+    type: boolean
+    default: false
+    description: Include soft-deleted (archived) entries.
+  kind:
+    in: query
+    type: string
+    enum: [note, column_meaning, business_rule, metric_definition, join_hint, document]
+    description: Filter to a single kind of entry. Omit to get all kinds.
+response_hint: |
+  Shape: {success, data: {entries[]}}. Each entry has kind, title, content,
+  pinned, created_by, created_at, updated_at. Entries are ordered pinned-first
+  then newest-first — treat pinned entries as ground truth for this dataset.
+```
+
+## save_dataset_knowledge
+
+```yaml
+type: tool
+name: save_dataset_knowledge
+description: |
+  Khi người dùng cung cấp thông tin nghiệp vụ mới, sửa cách hiểu của bạn, định
+  nghĩa metric/quy tắc, hoặc bạn phát hiện mapping cột quan trọng — lưu lại
+  bằng tool này. Mỗi entry 1 fact, ngắn gọn.
+connection: edm
+method: POST
+path: /api/datasets/{dataset_id}/knowledge
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_datasets.
+  kind:
+    in: body
+    type: string
+    enum: [note, column_meaning, business_rule, metric_definition, join_hint, document]
+    description: Defaults to 'note' if omitted.
+  title:
+    in: body
+    type: string
+    required: true
+    description: Short label for this fact, e.g. "doanh_thu excludes VAT".
+  content:
+    in: body
+    type: string
+    required: true
+    description: The fact itself — one idea, concise (max 4000 chars).
+  pinned:
+    in: body
+    type: boolean
+    description: Pin so this entry always surfaces first (default false).
+response_hint: |
+  Shape: {success, data: {id, kind, title, content, pinned, ...}}. Keep the
+  returned id if you may need to update this entry later via
+  update_dataset_knowledge.
+  error.code=KNOWLEDGE_LIMIT_REACHED means the dataset already has 200 active
+  entries — archive/consolidate before adding more.
+```
+
+## update_dataset_knowledge
+
+```yaml
+type: tool
+name: update_dataset_knowledge
+description: |
+  Update an existing knowledge entry — e.g. when the user corrects a fact,
+  extends a business rule, or asks you to pin/unpin something important. Only
+  send the fields that changed; omitted fields keep their current value.
+connection: edm
+method: PUT
+path: /api/datasets/{dataset_id}/knowledge/{entry_id}
+params:
+  dataset_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_datasets.
+  entry_id:
+    in: path
+    type: string
+    required: true
+    description: UUID of the knowledge entry, from get_dataset_knowledge or search_knowledge.
+  title:
+    in: body
+    type: string
+    description: New title. Omit to keep the current one.
+  content:
+    in: body
+    type: string
+    description: New content. Omit to keep the current one.
+  pinned:
+    in: body
+    type: boolean
+    description: New pinned state. Omit to keep the current one.
+response_hint: |
+  Shape: {success, data: {id, kind, title, content, pinned, ...}}.
+  error.code=KNOWLEDGE_NOT_FOUND means the entry_id/dataset_id pair doesn't exist.
+  error.code=VALIDATION_ERROR means none of title/content/pinned were provided
+  — at least one is required.
+```
+
+## search_knowledge
+
+```yaml
+type: tool
+name: search_knowledge
+description: |
+  Full-text search across knowledge entries in one or more datasets. Use this
+  when the user asks something like "what do we know about X", or before
+  answering a question that might already have a saved business rule / metric
+  definition covering it.
+connection: edm
+method: GET
+path: /api/knowledge/search
+params:
+  dataset_ids:
+    in: query
+    type: string
+    required: true
+    description: Comma-joined dataset UUIDs to search within, e.g. "id1,id2".
+  q:
+    in: query
+    type: string
+    required: true
+    description: Search text (matches title + content, accent-insensitive).
+  limit:
+    in: query
+    type: integer
+    default: 5
+    description: Max results, 1-20.
+response_hint: |
+  Shape: {success, data: {results[]}}. Each result has dataset_id, kind, title,
+  content, pinned, score. Pinned entries can appear even without a strong text
+  match.
+```
+
 ---
 
 # Partner tools (reconciliation examples)
