@@ -36,6 +36,8 @@ public class ExternalSchemaService(
             return ApiResult<object>.Fail(ErrorCodes.ValidationError, "At least one table must be selected.");
         }
 
+        tables = DedupTables(tables);
+
         var maxTables = configuration.GetValue<int?>("ExternalQuery:MaxTablesPerDataset") ?? 50;
         if (tables.Length > maxTables)
         {
@@ -144,15 +146,47 @@ public class ExternalSchemaService(
 
         await tx.CommitAsync(ct);
 
-        var manifestTables = await PersistTablesAsync(conn, connector, config, datasetId, selected, includeSamples, ct);
+        // From here on the dataset row is committed. If persisting tables/columns or writing the
+        // manifest throws, the committed row would otherwise strand as a "ready" dataset that
+        // consumes the user's max_datasets slot forever. Compensate by deleting it (cascades to
+        // dataset_tables/columns) and its storage directory, then report failure instead of
+        // leaving a half-created dataset behind.
+        try
+        {
+            var manifestTables = await PersistTablesAsync(conn, connector, config, datasetId, selected, includeSamples, ct);
 
-        storage.EnsureDatasetDirectories(userId, datasetId);
-        var manifest = ExternalManifestBuilder.Build(trimmedName, connRow.Provider, manifestTables);
-        await File.WriteAllTextAsync(storage.GetManifestPath(userId, datasetId), manifest, ct);
+            storage.EnsureDatasetDirectories(userId, datasetId);
+            var manifest = ExternalManifestBuilder.Build(trimmedName, connRow.Provider, manifestTables);
+            await File.WriteAllTextAsync(storage.GetManifestPath(userId, datasetId), manifest, ct);
 
-        await conn.ExecuteAsync(
-            "UPDATE datasets SET schema_refreshed_at = NOW() WHERE id = @Id",
-            new { Id = datasetId });
+            await conn.ExecuteAsync(
+                "UPDATE datasets SET schema_refreshed_at = NOW() WHERE id = @Id",
+                new { Id = datasetId });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to persist tables/manifest for new external dataset {DatasetId}; compensating.", datasetId);
+
+            try
+            {
+                await conn.ExecuteAsync("DELETE FROM datasets WHERE id = @Id", new { Id = datasetId });
+            }
+            catch (Exception cleanupEx)
+            {
+                logger.LogError(cleanupEx, "Failed to compensate-delete stranded dataset {DatasetId} after persistence failure.", datasetId);
+            }
+
+            try
+            {
+                storage.DeleteDatasetDirectory(userId, datasetId);
+            }
+            catch (Exception cleanupEx)
+            {
+                logger.LogWarning(cleanupEx, "Failed to delete storage directory for dataset {DatasetId} during rollback.", datasetId);
+            }
+
+            return ApiResult<object>.Fail(ErrorCodes.Internal, "Failed to save dataset schema. Please try again.");
+        }
 
         return ApiResult<object>.Ok(new
         {
@@ -250,10 +284,26 @@ public class ExternalSchemaService(
             return ApiResult<object>.Fail(ErrorCodes.NoTableFound, "None of the previously selected tables were found on the source database.");
         }
 
-        // Cascades to dataset_columns via ON DELETE CASCADE.
-        await conn.ExecuteAsync("DELETE FROM dataset_tables WHERE dataset_id = @Id", new { Id = datasetId });
+        // Wrapped in a transaction: if re-persisting the new tables fails partway through, the
+        // delete rolls back too, so the dataset keeps its prior (still-valid) schema instead of
+        // being left with no dataset_tables at all.
+        await using var refreshTx = await conn.BeginTransactionAsync(ct);
+        List<ExternalManifestTable> manifestTables;
+        try
+        {
+            // Cascades to dataset_columns via ON DELETE CASCADE.
+            await conn.ExecuteAsync("DELETE FROM dataset_tables WHERE dataset_id = @Id", new { Id = datasetId }, refreshTx);
 
-        var manifestTables = await PersistTablesAsync(conn, connector, config, datasetId, selected, dataset.IncludeSamples, ct);
+            manifestTables = await PersistTablesAsync(conn, connector, config, datasetId, selected, dataset.IncludeSamples, ct, refreshTx);
+
+            await refreshTx.CommitAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            await refreshTx.RollbackAsync(ct);
+            logger.LogError(ex, "Failed to refresh dataset_tables for dataset {DatasetId}; rolled back to prior schema.", datasetId);
+            return ApiResult<object>.Fail(ErrorCodes.Internal, "Failed to refresh dataset schema. Please try again.");
+        }
 
         storage.EnsureDatasetDirectories(userId, datasetId);
         var manifest = ExternalManifestBuilder.Build(dataset.Name, connRow.Provider, manifestTables);
@@ -282,7 +332,8 @@ public class ExternalSchemaService(
         Guid datasetId,
         List<ExternalTableInfo> tables,
         bool includeSamples,
-        CancellationToken ct)
+        CancellationToken ct,
+        NpgsqlTransaction? tx = null)
     {
         var manifestTables = new List<ExternalManifestTable>();
         var sourceType = "external_" + connector.Provider;
@@ -318,7 +369,7 @@ public class ExternalSchemaService(
                 SourceType = sourceType,
                 ColumnCount = table.Columns.Count,
                 SampleRowsJson = includeSamples ? JsonSerializer.Serialize(sampleRows) : null
-            });
+            }, tx);
 
             var ordinal = 1;
             foreach (var col in table.Columns)
@@ -337,7 +388,7 @@ public class ExternalSchemaService(
                     NormalizedName = col.Name,
                     DisplayName = col.Name,
                     InferredType = col.DataType
-                });
+                }, tx);
                 ordinal++;
             }
 
@@ -346,6 +397,12 @@ public class ExternalSchemaService(
 
         return manifestTables;
     }
+
+    /// <summary>Removes duplicate table names (ordinal comparison) from a caller-supplied list,
+    /// preserving first-seen order, so duplicates can't create double dataset_tables rows or
+    /// artificially inflate the MaxTablesPerDataset count.</summary>
+    public static string[] DedupTables(string[] tables) =>
+        tables.Distinct(StringComparer.Ordinal).ToArray();
 
     private IExternalDbConnector? ResolveConnector(string provider) =>
         connectors.FirstOrDefault(c => c.Provider == provider);

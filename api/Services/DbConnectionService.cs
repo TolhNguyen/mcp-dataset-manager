@@ -228,7 +228,7 @@ public class DbConnectionService(
 
     /// <summary>Decrypts and returns the config for a connection owned by <paramref name="userId"/>.
     /// Never exposed directly to API responses — internal use only.</summary>
-    public async Task<DbConnectionConfig?> GetConfigAsync(Guid userId, Guid id, CancellationToken ct = default)
+    internal async Task<DbConnectionConfig?> GetConfigAsync(Guid userId, Guid id, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         var encrypted = await conn.ExecuteScalarAsync<string?>(
