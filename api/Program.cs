@@ -227,6 +227,8 @@ builder.Services.AddSingleton<IExternalDbConnector, MsSqlDbConnector>();
 builder.Services.AddSingleton<IExternalDbConnector, BigQueryDbConnector>();
 builder.Services.AddScoped<DbConnectionService>();
 builder.Services.AddScoped<ExternalSchemaService>();
+builder.Services.AddScoped<ExternalQueryService>();
+builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<SecretProtector>();
 builder.Services.AddSingleton<FileStorageService>();

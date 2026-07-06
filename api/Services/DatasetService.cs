@@ -32,7 +32,9 @@ public class DatasetService(
                created_at AS CreatedAt,
                processed_at AS ProcessedAt,
                COALESCE(business_knowledge, '') AS BusinessKnowledge,
-               business_knowledge_updated_at AS BusinessKnowledgeUpdatedAt
+               business_knowledge_updated_at AS BusinessKnowledgeUpdatedAt,
+               source_kind AS SourceKind,
+               connection_id AS ConnectionId
         FROM datasets
         """;
 

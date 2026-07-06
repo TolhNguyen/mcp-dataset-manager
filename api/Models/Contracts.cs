@@ -52,7 +52,9 @@ public record DatasetRecord(
     DateTime CreatedAt,
     DateTime? ProcessedAt,
     string BusinessKnowledge,
-    DateTime? BusinessKnowledgeUpdatedAt
+    DateTime? BusinessKnowledgeUpdatedAt,
+    string SourceKind,
+    Guid? ConnectionId
 );
 
 public record DatasetTableRecord(

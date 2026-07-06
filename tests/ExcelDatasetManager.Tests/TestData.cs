@@ -37,7 +37,9 @@ internal static class TestData
         CreatedAt: DateTime.UtcNow,
         ProcessedAt: DateTime.UtcNow,
         BusinessKnowledge: businessKnowledge,
-        BusinessKnowledgeUpdatedAt: DateTime.UtcNow);
+        BusinessKnowledgeUpdatedAt: DateTime.UtcNow,
+        SourceKind: "file",
+        ConnectionId: null);
 
     public static ParsedTable NewParsedTable() => new(
         SourceName: "orders",
