@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cho phép truy cập — Excel Dataset Manager</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f172a; color: #e2e8f0;
+         display: flex; justify-content: center; padding-top: 8vh; margin: 0; min-height: 100vh; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+          padding: 32px; width: 420px; max-width: 92vw; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p  { color: #94a3b8; font-size: 14px; line-height: 1.5; }
+  label { display: block; font-size: 13px; margin: 14px 0 4px; color: #cbd5e1; }
+  input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
+          border: 1px solid #475569; background: #0f172a; color: #e2e8f0; font-size: 14px; }
+  button { width: 100%; margin-top: 18px; padding: 12px; border: 0; border-radius: 8px;
+           font-size: 15px; font-weight: 600; cursor: pointer; }
+  .primary { background: linear-gradient(90deg, #2563eb, #3b82f6); color: white; }
+  .secondary { background: transparent; color: #94a3b8; margin-top: 8px; }
+  .error { color: #f87171; font-size: 13px; margin-top: 10px; min-height: 18px; }
+  .meta { border-top: 1px solid #334155; margin-top: 20px; padding-top: 12px;
+          font-size: 12px; color: #64748b; word-break: break-all; }
+  .hidden { display: none; }
+  .account { background: #0f172a; border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Cho phép truy cập EDM</h1>
+  <p id="intro">Một ứng dụng AI đang yêu cầu quyền truy cập dữ liệu Excel Dataset Manager của bạn
+     (đọc dataset, chạy truy vấn SQL chỉ-đọc).</p>
+
+  <div id="invalid" class="hidden">
+    <p class="error">Yêu cầu ủy quyền không hợp lệ (thiếu tham số OAuth). Hãy thử kết nối lại từ ứng dụng AI.</p>
+  </div>
+
+  <div id="login" class="hidden">
+    <label>Email</label>
+    <input id="email" type="email" autocomplete="username" />
+    <label>Mật khẩu</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <button class="primary" id="btn-login">Đăng nhập</button>
+  </div>
+
+  <div id="approve" class="hidden">
+    <div class="account">Đăng nhập với: <strong id="account-email"></strong></div>
+    <button class="primary" id="btn-approve">Cho phép truy cập</button>
+    <button class="secondary" id="btn-deny">Từ chối</button>
+  </div>
+
+  <div class="error" id="error"></div>
+
+  <div class="meta">
+    <div>Client: <span id="meta-client"></span></div>
+    <div>Redirect: <span id="meta-redirect"></span></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var q = new URLSearchParams(window.location.search);
+  var params = {
+    responseType: q.get('response_type'),
+    clientId: q.get('client_id'),
+    redirectUri: q.get('redirect_uri'),
+    state: q.get('state') || '',
+    codeChallenge: q.get('code_challenge'),
+    codeChallengeMethod: q.get('code_challenge_method')
+  };
+
+  var el = function (id) { return document.getElementById(id); };
+  var show = function (id) { el(id).classList.remove('hidden'); };
+  var hide = function (id) { el(id).classList.add('hidden'); };
+  var setError = function (msg) { el('error').textContent = msg || ''; };
+
+  el('meta-client').textContent = params.clientId || '(không có)';
+  el('meta-redirect').textContent = params.redirectUri || '(không có)';
+
+  var valid = params.responseType === 'code' && params.clientId && params.redirectUri
+              && params.codeChallenge && params.codeChallengeMethod === 'S256';
+  if (!valid) { hide('intro'); show('invalid'); return; }
+
+  function checkSession() {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (body) {
+        if (body && body.success) {
+          el('account-email').textContent = body.user.email;
+          hide('login'); show('approve');
+        } else {
+          hide('approve'); show('login');
+        }
+      })
+      .catch(function () { hide('approve'); show('login'); });
+  }
+
+  el('btn-login').addEventListener('click', function () {
+    setError('');
+    fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: el('email').value.trim(), password: el('password').value })
+    })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        if (res.ok && res.body.success) { checkSession(); }
+        else { setError((res.body.error && res.body.error.message) || 'Đăng nhập thất bại.'); }
+      })
+      .catch(function () { setError('Không kết nối được máy chủ.'); });
+  });
+
+  el('btn-approve').addEventListener('click', function () {
+    setError('');
+    fetch('/api/oauth/authorize/approve', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        client_id: params.clientId,
+        redirect_uri: params.redirectUri,
+        code_challenge: params.codeChallenge,
+        code_challenge_method: params.codeChallengeMethod,
+        state: params.state
+      })
+    })
+      .then(function (r) { return r.json().then(function (b) { return { ok: r.ok, body: b }; }); })
+      .then(function (res) {
+        if (res.ok && res.body.redirect_to) { window.location.replace(res.body.redirect_to); }
+        else { setError(res.body.error_description || res.body.error || 'Ủy quyền thất bại.'); }
+      })
+      .catch(function () { setError('Không kết nối được máy chủ.'); });
+  });
+
+  el('btn-deny').addEventListener('click', function () {
+    var sep = params.redirectUri.indexOf('?') >= 0 ? '&' : '?';
+    var target = params.redirectUri + sep + 'error=access_denied';
+    if (params.state) target += '&state=' + encodeURIComponent(params.state);
+    window.location.replace(target);
+  });
+
+  checkSession();
+})();
+</script>
+</body>
+</html>
