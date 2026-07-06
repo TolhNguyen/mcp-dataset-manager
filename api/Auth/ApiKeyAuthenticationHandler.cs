@@ -49,18 +49,6 @@ public class ApiKeyAuthenticationHandler(
         }
 
         var rawKey = headerValues.ToString().Trim();
-        if (Guid.TryParse(rawKey, out var insecureUserId))
-        {
-            var claims = new[]
-            {
-                new Claim(ClaimTypes.NameIdentifier, insecureUserId.ToString()),
-                new Claim("sub", insecureUserId.ToString()),
-                new Claim("auth_method", "insecure_user_id")
-            };
-
-            return AuthSuccess(claims);
-        }
-
         if (string.IsNullOrWhiteSpace(rawKey) || !rawKey.StartsWith(DatasetKeyPrefix, StringComparison.Ordinal))
         {
             return AuthenticateResult.Fail("Invalid API key format.");
