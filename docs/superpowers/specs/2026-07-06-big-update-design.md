@@ -1,6 +1,6 @@
-# Big Update Design — External DB (live query), Knowledge Memory, Structured Context + Join
+# Big Update Design — External DB (live query), Knowledge Memory, Structured Context + Join, AI Dashboards
 
-Ngày: 2026-07-06 (bản 2 — đã cập nhật theo quyết định của user)
+Ngày: 2026-07-06 (bản 3 — thêm Sub-project D: dashboard + widget do AI tạo; bổ sung flow schema bootstrap)
 Trạng thái: chờ user duyệt lần cuối
 
 ## Các quyết định đã chốt
@@ -13,6 +13,8 @@ Trạng thái: chờ user duyệt lần cuối
 | Tương thích ngược | Không cần — bỏ `/mcp/{userId}`, bỏ field `business_knowledge` cũ, user/dataset cũ chấp nhận mất |
 | Giới hạn dataset | Per-user, cột `users.max_datasets` DEFAULT 10, operator chỉnh trực tiếp |
 | Cross-source join (Excel × DB ngoài, DB × DB khác connection) | **Phase sau.** Update này: join trong cùng connection (DB nguồn tự join) + join giữa các dataset Excel (DuckDB) |
+| Dashboard | AI tạo widget (saved query + chart) qua MCP; dashboard user tự chạy lại query — không cần chat lại. Xem dashboard yêu cầu JWT; share link công khai để phase sau |
+| Schema bootstrap | Khi kết nối DB: đọc toàn bộ bảng + cột + kiểu + **2 dòng mẫu/bảng** làm gợi ý cho AI trước khi lập plan/viết SQL |
 
 ---
 
@@ -71,18 +73,30 @@ ALTER TABLE datasets
     ADD COLUMN source_kind VARCHAR(20) NOT NULL DEFAULT 'file',  -- 'file' | 'external_db'
     ADD COLUMN connection_id UUID REFERENCES db_connections(id),
     ADD COLUMN external_tables JSONB,       -- danh sách bảng user đã chọn expose cho AI
+    ADD COLUMN include_samples BOOLEAN NOT NULL DEFAULT TRUE,  -- tắt cho dữ liệu nhạy cảm
     ADD COLUMN schema_refreshed_at TIMESTAMPTZ;
+
+ALTER TABLE dataset_tables ADD COLUMN sample_rows JSONB;  -- 2 dòng mẫu/bảng (gợi ý cho AI)
 
 ALTER TABLE users ADD COLUMN max_datasets INT NOT NULL DEFAULT 10;
 ```
 Dataset external tái dùng `dataset_tables` + `dataset_columns` để lưu **metadata schema** (không có parquet — `data_file_name` để rỗng). Nút "Refresh schema" đọc lại metadata từ DB nguồn.
+
+### Flow schema bootstrap (khi tạo connection / dataset external)
+Ngay khi kết nối thành công, hệ thống tự động đọc và lưu làm gợi ý cho AI:
+1. **Toàn bộ bảng/view** trong database (qua `information_schema` / `INFORMATION_SCHEMA.TABLES` / BigQuery dataset listing).
+2. **Toàn bộ cột + kiểu dữ liệu + nullable** mỗi bảng.
+3. **2 dòng dữ liệu mẫu mỗi bảng** (`SELECT * … LIMIT 2` theo dialect) → lưu vào `dataset_tables.sample_rows`.
+4. Row count ước tính (từ statistics của DB, không `COUNT(*)` bảng lớn).
+
+Bộ metadata này được Context API (C1) trả cho AI **trước khi AI lập plan hoặc viết SQL** — tool description bắt buộc AI gọi `get_context` trước query đầu tiên. Sample rows có toggle `include_samples=false` per dataset cho dữ liệu nhạy cảm. Đây là dữ liệu duy nhất được lưu (2 dòng/bảng) — chấp nhận được vì mục đích gợi ý, user kiểm soát được bằng toggle.
 
 ### Thành phần mới (`api/Services/Connectors/`)
 - `IExternalDbConnector`: `TestAsync`, `ListTablesAsync`, `GetTableSchemaAsync`, `ExecuteQueryAsync(config, sql, maxRows, timeout, ct)` — trả reader stream, map về compact_table như DuckDB path.
 - 4 implementation: `MySqlDbConnector` (MySqlConnector), `MsSqlDbConnector` (Microsoft.Data.SqlClient), `PostgresDbConnector` (Npgsql), `BigQueryDbConnector` (Google.Cloud.BigQuery.V2).
 - `DbConnectionService`: CRUD + test; config mã hoá qua `SecretProtector`; response không bao giờ chứa secret (host masked một phần).
 - `ExternalQueryService`: đối trọng của `DuckDbQueryService` — validate theo dialect → wrap row cap → execute qua connector → token budget + query_logs y hệt path DuckDB. `POST /api/datasets/{id}/query` route theo `source_kind`.
-- Sample values cho external: khi refresh schema, lấy tối đa 5 giá trị mẫu/cột bằng `SELECT ... LIMIT 5` — chỉ để hiển thị trong context, có toggle tắt cho dữ liệu nhạy cảm (`include_samples=false` per dataset).
+- Sample data cho external: theo flow schema bootstrap ở trên (2 dòng mẫu/bảng), refresh cùng lúc với schema.
 
 ### API endpoints (`api/Endpoints/ConnectionEndpoints.cs`, JwtOnly)
 ```
@@ -149,7 +163,7 @@ Field `datasets.business_knowledge` cũ: **xoá** (không cần back-compat). Mi
 
 ### Quyền ghi
 - JWT / PAT: full CRUD.
-- Dataset API key: read mặc định; cột mới `dataset_api_keys.can_write_knowledge BOOLEAN DEFAULT FALSE` — user bật khi tạo key để cấp quyền ghi memory cho agent.
+- Dataset API key: read mặc định; cột mới `dataset_api_keys.can_write BOOLEAN DEFAULT FALSE` — user bật khi tạo key để cấp quyền ghi cho agent (phạm vi: knowledge entries + dashboard widgets của đúng dataset đó).
 - Policy mới `KnowledgeWrite` cho các endpoint ghi.
 
 ### Guardrails
@@ -210,7 +224,68 @@ POST /api/query
 - Upload .md/.txt (≤1MB) vào dataset → tách theo heading thành entries `kind='document'` (mỗi section 1 entry, title = heading) → tìm qua `search_knowledge` như mọi entry khác. AI không phải đọc nguyên file MD nữa.
 
 ### MCP tools sau update (tools.md viết lại)
-`list_datasets`, `get_context` (thay get_dataset_schema), `query_dataset` (single, cả file lẫn external), `query_datasets` (multi, file-only), `get_dataset_knowledge`, `save_dataset_knowledge`, `update_dataset_knowledge`, `search_knowledge`, `upload_dataset`, `get_dataset`, `delete_dataset`.
+`list_datasets`, `get_context` (thay get_dataset_schema), `query_dataset` (single, cả file lẫn external), `query_datasets` (multi, file-only), `get_dataset_knowledge`, `save_dataset_knowledge`, `update_dataset_knowledge`, `search_knowledge`, `create_dashboard_widget`, `list_dashboard_widgets`, `update_dashboard_widget`, `upload_dataset`, `get_dataset`, `delete_dataset`.
+
+---
+
+## Sub-project D — Dashboard thống kê + widget do AI tạo
+
+### Concept
+User chat với AI một lần để xây dashboard; AI gọi MCP tool tạo **widget** = saved query (SQL đã đóng băng) + cấu hình chart. Từ đó màn hình dashboard tự chạy lại query mỗi lần xem/refresh — với dataset external là query live vào DB nguồn nên dữ liệu luôn mới, **không cần chat lại với AI**.
+
+### Data model
+```sql
+CREATE TABLE dashboards (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id),
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    created_by TEXT NOT NULL,               -- email hoặc "ai:<key name>"
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE dashboard_widgets (
+    id UUID PRIMARY KEY,
+    dashboard_id UUID NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
+    dataset_id UUID NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    sql TEXT NOT NULL,                      -- validated read-only, đóng băng tại thời điểm lưu
+    chart_type VARCHAR(20) NOT NULL,        -- 'table' | 'line' | 'bar' | 'pie' | 'stat'
+    chart_config JSONB,                     -- mapping cột → trục/series, format số…
+    refresh_interval_sec INT NOT NULL DEFAULT 60,   -- min 30
+    position INT NOT NULL DEFAULT 0,
+    source VARCHAR(10) NOT NULL,            -- 'user' | 'ai'
+    created_by TEXT NOT NULL,
+    archived_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### Mô hình bảo mật (điểm mấu chốt của tính năng)
+1. **SQL đóng băng tại thời điểm lưu.** Browser chỉ gọi `GET /api/dashboards/{id}/widgets/{wid}/data` — không bao giờ gửi SQL. Đổi SQL phải qua PUT (JWT) hoặc MCP tool có quyền ghi.
+2. **Validate 2 lần:** lúc lưu (QueryValidator theo dialect của dataset + chạy thử `LIMIT 1` để bắt lỗi sớm) và lúc mỗi lần thực thi (phòng row trong Postgres bị sửa trực tiếp). Luôn read-only, luôn row cap (`Dashboard:MaxRowsPerWidget`, mặc định 500), luôn timeout.
+3. **Widget AI tạo gắn `source='ai'`** — UI hiện badge, user review/sửa/archive. Giới hạn `Dashboard:MaxWidgetsPerDashboard` (20) và 10 dashboard/user.
+4. **Chống nện DB khách:** `refresh_interval_sec` tối thiểu 30s; kết quả cache **in-memory** (IMemoryCache, TTL = refresh interval) — nhiều lần xem trong TTL không đánh thêm query nào vào DB nguồn; không ghi đĩa (giữ nguyên tắc không lưu dữ liệu). Widget data endpoint có rate limit riêng.
+5. **Xem dashboard yêu cầu JWT.** Share link công khai (signed URL, read-only) để phase sau — tách riêng phần rủi ro nhất.
+6. Quyền tạo widget qua MCP: PAT full; dataset-scoped key cần flag `can_write` (dùng chung flag với knowledge — đổi tên `can_write_knowledge` thành `can_write`, phạm vi: knowledge + widgets của đúng dataset đó).
+
+### API endpoints
+```
+POST/GET      /api/dashboards                      PUT/DELETE /api/dashboards/{id}
+POST/GET      /api/dashboards/{id}/widgets         PUT/DELETE /api/dashboards/{id}/widgets/{wid}
+GET           /api/dashboards/{id}/widgets/{wid}/data    — thực thi saved SQL, trả compact_table (cache theo TTL)
+```
+Ghi: JWT hoặc `KnowledgeWrite`-tương-đương (PAT / key có `can_write`). Đọc data: JWT.
+
+### MCP tools
+- `create_dashboard_widget(dashboard_name, dataset_id, title, sql, chart_type, chart_config)` — tự tạo dashboard nếu chưa có theo tên. Description hướng dẫn AI: "Khi người dùng muốn theo dõi một chỉ số thường xuyên, tạo widget để họ xem realtime trên dashboard mà không cần hỏi lại bạn."
+- `list_dashboard_widgets`, `update_dashboard_widget` (archive qua update).
+
+### UI
+- `dashboards.html`: danh sách dashboard → grid widget; render chart bằng **Chart.js self-host** trong wwwroot (không CDN); auto-refresh theo `refresh_interval_sec` bằng polling; badge "AI" cho widget máy tạo; nút sửa/di chuyển/archive.
+- Widget lỗi (bảng bị đổi schema, connection chết) hiển thị lỗi trong ô widget kèm nút "Nhờ AI sửa" (copy prompt gợi ý).
 
 ---
 
@@ -219,17 +294,20 @@ POST /api/query
 | Phase | Nội dung | PR |
 |---|---|---|
 | 0 | P0-1…P0-6 | 1 PR |
-| A | Connections CRUD + connectors + ExternalQueryService + UI | 2–3 PR (connector core → query path → UI) |
+| A | Connections CRUD + connectors + schema bootstrap + ExternalQueryService + UI | 2–3 PR (connector core → query path → UI) |
 | B | Knowledge memory: schema + API + MCP tools + UI tab | 1–2 PR |
 | C | Context API → multi-dataset query → documents + search | 2–3 PR |
+| D | Dashboards: schema + widget API + execution/cache + MCP tools + UI | 2 PR (backend → UI) |
 
-B và C có thể song song sau Phase 0; A độc lập sau Phase 0.
+B và C có thể song song sau Phase 0; A độc lập sau Phase 0; D cần A (query external) + nên sau C (AI dùng context để viết SQL widget chuẩn).
 
 ## Testing
-- xUnit: QueryValidator per-dialect (trọng tâm — đây là lớp an ninh), SecretProtector round-trip, row-cap wrapper per dialect, alias/slug, context shaping + token cap, knowledge guardrails + search ranking, multi-dataset DuckDB schema setup (Parquet fixture).
+- xUnit: QueryValidator per-dialect (trọng tâm — đây là lớp an ninh), SecretProtector round-trip, row-cap wrapper per dialect, alias/slug, context shaping + token cap, knowledge guardrails + search ranking, multi-dataset DuckDB schema setup (Parquet fixture), widget save-time + execution-time validation, cache TTL.
 - Integration: docker-compose thêm profile `dev` với MySQL + MSSQL container mẫu để test connector thật.
 
 ## Rủi ro còn lại
 1. MSSQL không có session read-only → phụ thuộc validator + read-only account. Giảm thiểu: blocklist T-SQL đầy đủ + cảnh báo UI đậm + test injection kỹ.
 2. BigQuery tính phí theo bytes scanned — mỗi query của AI là tiền của khách. Giảm thiểu: hiển thị `total_bytes_processed` trong response, hỗ trợ `maximum_bytes_billed` trong connection config (mặc định 1GB).
 3. Live query nghĩa là DB khách chậm → AI chờ. Timeout 30s + thông báo lỗi rõ để AI thu hẹp query.
+4. Dashboard widgets tạo tải định kỳ lên DB khách (mỗi widget 1 query/refresh). Giảm thiểu: min interval 30s, cache in-memory theo TTL, concurrent limit per-connection dùng chung với query path.
+5. 2 dòng sample rows/bảng là dữ liệu người dùng được lưu (duy nhất). Kiểm soát: toggle `include_samples` per dataset, xoá sạch khi xoá dataset, ghi rõ trong UI khi tạo connection.
