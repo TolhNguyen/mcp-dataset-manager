@@ -34,6 +34,9 @@ max_response_bytes: 0
 
 ## Connection: EDM (Excel Dataset Manager — your own server)
 
+Lưu ý: `${request.user_token}` là PAT (edm_pat_...) lấy từ header
+`Authorization: Bearer ...` của client MCP — không còn là user id trên URL.
+
 ```yaml
 type: connection
 id: edm
