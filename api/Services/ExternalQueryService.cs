@@ -120,6 +120,7 @@ public class ExternalQueryService(
                 var rows = queryResult.Rows;
 
                 sw.Stop();
+                // Response/token-budget/query_logs cascade below is kept in sync with DuckDbQueryService — update both together.
                 var result = new
                 {
                     format = "compact_table",
@@ -219,7 +220,9 @@ public class ExternalQueryService(
                 await LogAsync(queryId, datasetId, userId, request.Sql, executedSql, "failed",
                     (int)sw.ElapsedMilliseconds, 0, null, null, ErrorCodes.ExternalQueryFailed, message);
 
-                logger.LogWarning(ex, "External query failed for dataset {DatasetId} (provider {Provider})", datasetId, provider);
+                // Never log the raw exception (ex) here — ex.Message/stack can echo the connection string
+                // or other secret material from the DB driver. Only the sanitized message is safe to log.
+                logger.LogWarning("External query failed for dataset {DatasetId} ({Provider}): {Error}", datasetId, provider, message);
 
                 return new
                 {
