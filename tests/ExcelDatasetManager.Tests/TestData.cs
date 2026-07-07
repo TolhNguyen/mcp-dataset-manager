@@ -37,7 +37,8 @@ internal static class TestData
         CreatedAt: DateTime.UtcNow,
         ProcessedAt: DateTime.UtcNow,
         SourceKind: "file",
-        ConnectionId: null);
+        ConnectionId: null,
+        Alias: "orders");
 
     public static ParsedTable NewParsedTable() => new(
         SourceName: "orders",

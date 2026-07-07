@@ -29,7 +29,8 @@ public class DatasetService(
                created_at AS CreatedAt,
                processed_at AS ProcessedAt,
                source_kind AS SourceKind,
-               connection_id AS ConnectionId
+               connection_id AS ConnectionId,
+               alias AS Alias
         FROM datasets
         """;
 
@@ -138,6 +139,8 @@ public class DatasetService(
                 new { max_datasets = maxDatasets, current_count = count });
         }
 
+        var alias = await GenerateUniqueAliasAsync(conn, userId, name, tx);
+
         storage.EnsureDatasetDirectories(userId, datasetId);
         var originalPath = storage.GetOriginalPath(userId, datasetId, storedFileName);
 
@@ -159,10 +162,10 @@ public class DatasetService(
         await conn.ExecuteAsync("""
             INSERT INTO datasets
                 (id, user_id, name, original_file_name, file_type, stored_file_name,
-                 file_size_bytes, manifest_file_name, status)
+                 file_size_bytes, manifest_file_name, status, alias)
             VALUES
                 (@Id, @UserId, @Name, @OriginalFileName, @FileType, @StoredFileName,
-                 @FileSizeBytes, 'manifest.md', 'processing')
+                 @FileSizeBytes, 'manifest.md', 'processing', @Alias)
             """, new
         {
             Id = datasetId,
@@ -171,7 +174,8 @@ public class DatasetService(
             OriginalFileName = file.FileName,
             FileType = fileType,
             StoredFileName = storedFileName,
-            FileSizeBytes = file.Length
+            FileSizeBytes = file.Length,
+            Alias = alias
         }, tx);
 
         await tx.CommitAsync(ct);
@@ -353,6 +357,19 @@ public class DatasetService(
         conn.ExecuteScalarAsync<int>(
             "SELECT max_datasets FROM users WHERE id = @UserId",
             new { UserId = userId }, tx);
+
+    /// <summary>
+    /// Computes a unique-per-user alias slug for a new dataset. Call inside the same
+    /// advisory-locked transaction as the INSERT so concurrent creates can't collide.
+    /// </summary>
+    public static async Task<string> GenerateUniqueAliasAsync(
+        NpgsqlConnection conn, Guid userId, string name, NpgsqlTransaction? tx = null)
+    {
+        var existing = (await conn.QueryAsync<string>(
+            "SELECT alias FROM datasets WHERE user_id = @UserId AND alias IS NOT NULL",
+            new { UserId = userId }, tx)).ToHashSet(StringComparer.Ordinal);
+        return AliasGenerator.MakeUnique(AliasGenerator.Slugify(name), existing);
+    }
 
     private static object BuildActions(Guid datasetId) => new
     {

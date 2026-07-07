@@ -51,7 +51,8 @@ public record DatasetRecord(
     DateTime CreatedAt,
     DateTime? ProcessedAt,
     string SourceKind,
-    Guid? ConnectionId
+    Guid? ConnectionId,
+    string? Alias
 );
 
 public record DatasetTableRecord(
