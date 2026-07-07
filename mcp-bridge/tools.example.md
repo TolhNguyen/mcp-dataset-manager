@@ -467,6 +467,164 @@ response_hint: |
   match.
 ```
 
+## create_dashboard_widget
+
+```yaml
+type: tool
+name: create_dashboard_widget
+description: |
+  Khi người dùng muốn theo dõi một chỉ số thường xuyên, tạo widget để họ xem
+  realtime trên dashboard mà không cần hỏi lại bạn. SQL phải là SELECT/WITH
+  read-only trên đúng dataset. Nếu dashboard_name chưa tồn tại, server sẽ tự
+  tạo dashboard mới với tên đó — không cần gọi list_dashboards trước.
+connection: edm
+method: POST
+path: /api/dashboards/widgets
+params:
+  dashboard_name:
+    in: body
+    type: string
+    required: true
+    description: Tên dashboard để nhóm widget này vào; tự tạo nếu chưa tồn tại.
+  dataset_id:
+    in: body
+    type: string
+    required: true
+    description: UUID của dataset widget này chạy SQL trên, lấy từ list_datasets.
+  title:
+    in: body
+    type: string
+    required: true
+    description: Tiêu đề ngắn hiển thị trên dashboard.
+  sql:
+    in: body
+    type: string
+    required: true
+    description: A single SELECT or WITH statement, read-only, against this dataset's tables.
+  chart_type:
+    in: body
+    type: string
+    required: true
+    enum: [table, line, bar, pie, stat]
+    description: How the widget should render its query result.
+  chart_config:
+    in: body
+    type: object
+    description: Optional chart-type-specific options (e.g. axis/series field names, colors).
+  refresh_interval_sec:
+    in: body
+    type: integer
+    description: How often the dashboard re-runs this widget's SQL, in seconds. Clamped to a 30s minimum server-side; omit to default to 60.
+response_hint: |
+  Shape: {success, data: {widget_id, dashboard_id, dataset_id, title, sql,
+  chart_type, chart_config, refresh_interval_sec, position, ...}}. Keep
+  widget_id + dashboard_id in case the user wants to change this widget later
+  via update_dashboard_widget.
+  error.code=VALIDATION_ERROR means the SQL wasn't accepted as a read-only
+  SELECT/WITH against the dataset, or a required field was missing/invalid.
+  error.code=DATASET_NOT_FOUND means dataset_id doesn't belong to this user.
+  error.code=WIDGET_LIMIT_REACHED means this dashboard already has 20 widgets.
+  error.code=DASHBOARD_LIMIT_REACHED means a NEW dashboard would exceed the
+  user's 10-dashboard cap — ask them to reuse an existing dashboard_name.
+```
+
+## list_dashboards
+
+```yaml
+type: tool
+name: list_dashboards
+description: |
+  List the user's dashboards (dashboard_id + name) so you can find or
+  reference one by name before calling get_dashboard, or decide whether a
+  dashboard_name already exists before creating a widget on it.
+connection: edm
+method: GET
+path: /api/dashboards
+response_hint: |
+  Shape: {success, data: {dashboards[]}}. Each dashboard has dashboard_id,
+  name, description, created_by, created_at, updated_at. Use dashboard_id
+  with get_dashboard to see its widgets.
+```
+
+## get_dashboard
+
+```yaml
+type: tool
+name: get_dashboard
+description: |
+  Fetch one dashboard's metadata plus all of its active widgets (title, sql,
+  chart_type, chart_config, refresh_interval_sec, position). Use this to show
+  the user what's already on a dashboard, or to find a widget_id before
+  calling update_dashboard_widget.
+connection: edm
+method: GET
+path: /api/dashboards/{dashboard_id}
+params:
+  dashboard_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_dashboards.
+response_hint: |
+  Shape: {success, data: {dashboard: {...}, widgets: [...]}}. Each widget has
+  widget_id, dashboard_id, dataset_id, title, sql, chart_type, chart_config,
+  refresh_interval_sec, position, source.
+  error.code=DASHBOARD_NOT_FOUND means the id doesn't belong to this user.
+```
+
+## update_dashboard_widget
+
+```yaml
+type: tool
+name: update_dashboard_widget
+description: |
+  Update an existing dashboard widget — e.g. when the user asks to change its
+  SQL, chart type, title, refresh rate, or reorder it. Only send the fields
+  that changed; omitted fields keep their current value. New sql is
+  re-validated as read-only SELECT/WITH before being saved.
+connection: edm
+method: PUT
+path: /api/dashboards/{dashboard_id}/widgets/{widget_id}
+params:
+  dashboard_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_dashboards or get_dashboard.
+  widget_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from get_dashboard.
+  title:
+    in: body
+    type: string
+    description: New title. Omit to keep the current one.
+  sql:
+    in: body
+    type: string
+    description: New SQL (SELECT/WITH only). Omit to keep the current one.
+  chart_type:
+    in: body
+    type: string
+    enum: [table, line, bar, pie, stat]
+    description: New chart type. Omit to keep the current one.
+  chart_config:
+    in: body
+    type: object
+    description: New chart-type-specific options. Omit to keep the current ones.
+  refresh_interval_sec:
+    in: body
+    type: integer
+    description: New refresh interval in seconds (clamped to a 30s minimum). Omit to keep the current one.
+response_hint: |
+  Shape: {success, data: {widget_id, dashboard_id, ..., updated_at}}.
+  error.code=WIDGET_NOT_FOUND or DASHBOARD_NOT_FOUND means the ids don't match
+  an existing widget owned by this user.
+  error.code=VALIDATION_ERROR means the new sql/title/chart_type didn't pass
+  validation.
+```
+
 ---
 
 # Partner tools (reconciliation examples)
