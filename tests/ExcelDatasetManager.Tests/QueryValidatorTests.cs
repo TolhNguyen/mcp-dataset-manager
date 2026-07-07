@@ -60,7 +60,11 @@ public class QueryValidatorTests
 
     [Theory]
     [InlineData("SELECT * FROM read_parquet('/etc/passwd')")]
+    [InlineData("SELECT * FROM parquet_scan('/etc/passwd')")]
     [InlineData("SELECT * FROM read_csv_auto('secret.csv')")]
+    [InlineData("SELECT read_text('/etc/passwd')")]
+    [InlineData("SELECT read_blob('/etc/shadow')")]
+    [InlineData("SELECT * FROM glob('/**')")]
     [InlineData("SELECT 1 UNION SELECT * FROM read_json('x.json')")]
     [InlineData("WITH t AS (SELECT 1) SELECT * FROM t; SET memory_limit='100GB'")]
     public void Rejects_dangerous_functions_even_inside_select(string sql)

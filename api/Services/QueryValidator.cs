@@ -18,7 +18,8 @@ public class QueryValidator
     {
         "insert", "update", "delete", "drop", "alter", "create", "truncate",
         "attach", "detach", "copy", "pragma", "call", "execute",
-        "read_csv", "read_csv_auto", "read_parquet", "read_json",
+        "read_csv", "read_csv_auto", "read_parquet", "parquet_scan", "read_json",
+        "read_text", "read_blob", "glob",
         "httpfs", "install", "load", "set"
     };
 

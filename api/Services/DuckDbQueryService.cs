@@ -402,6 +402,14 @@ public class DuckDbQueryService(
                     };
                 }
 
+                if (request.Options?.AllowLargeResult == true && !string.IsNullOrWhiteSpace(request.Options.ConfirmationId))
+                {
+                    return BuildTokenBudgetError(primaryId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
+                        summary, aiBudget, ErrorCodes.InvalidConfirmation,
+                        "Confirmation is missing, expired, or does not match this query result.",
+                        "requires_confirmation");
+                }
+
                 if (budgetDecision.Status == "blocked")
                 {
                     return BuildTokenBudgetError(primaryId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
@@ -427,6 +435,7 @@ public class DuckDbQueryService(
                 status = "completed",
                 result,
                 execution = new { engine = "duckdb", elapsed_ms = sw.ElapsedMilliseconds, max_rows = maxRows },
+                ai_budget = aiBudget,
                 sql = new { submitted = request.Sql, executed = executedSql },
                 warnings = Array.Empty<string>(),
                 error = (object?)null
