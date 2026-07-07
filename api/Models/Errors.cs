@@ -32,6 +32,7 @@ public static class ErrorCodes
     public const string ExternalSchemaFetchFailed = "EXTERNAL_SCHEMA_FETCH_FAILED";
     public const string ExternalQueryFailed = "EXTERNAL_QUERY_FAILED";
     public const string TooManyConcurrentQueries = "TOO_MANY_CONCURRENT_QUERIES";
+    public const string ExternalNotJoinable = "EXTERNAL_NOT_JOINABLE";
 
     // Query
     public const string InvalidSql = "INVALID_SQL";
