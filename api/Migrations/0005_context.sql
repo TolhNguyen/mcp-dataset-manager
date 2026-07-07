@@ -9,8 +9,10 @@ WITH slugged AS (
 ),
 numbered AS (
     SELECT id, user_id,
-           COALESCE(base, 'ds') AS base,
-           ROW_NUMBER() OVER (PARTITION BY user_id, COALESCE(base,'ds') ORDER BY id) AS rn
+           -- Cap the base slug so base + "_" + suffix always fits alias VARCHAR(64)
+           -- (name is VARCHAR(255), so an unbounded slug would overflow the column).
+           left(COALESCE(base, 'ds'), 55) AS base,
+           ROW_NUMBER() OVER (PARTITION BY user_id, left(COALESCE(base,'ds'), 55) ORDER BY id) AS rn
     FROM slugged
 )
 UPDATE datasets d
