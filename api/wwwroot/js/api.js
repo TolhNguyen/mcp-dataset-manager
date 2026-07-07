@@ -108,6 +108,12 @@ const Api = {
         fd.append('file', file);
         if (name) fd.append('name', name);
         return this.request('POST', '/api/datasets', { body: fd, isForm: true });
+    },
+
+    async uploadKnowledgeDocument(datasetId, file) {
+        const fd = new FormData();
+        fd.append('file', file);
+        return this.request('POST', `/api/datasets/${datasetId}/knowledge/documents`, { body: fd, isForm: true });
     }
 };
 

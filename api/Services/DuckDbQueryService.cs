@@ -255,6 +255,208 @@ public class DuckDbQueryService(
         }
     }
 
+    /// <summary>
+    /// Runs one read-only SQL query that may JOIN across several of the caller's FILE datasets.
+    /// Each dataset is exposed as a DuckDB schema named by its alias (e.g. sales.orders).
+    /// External datasets are not joinable and are rejected. Response shape matches QueryAsync.
+    /// </summary>
+    public async Task<object> QueryMultiAsync(Guid userId, Guid[] datasetIds, QueryRequest request, CancellationToken ct)
+    {
+        var queryId = Guid.NewGuid();
+        var sw = Stopwatch.StartNew();
+        var primaryId = datasetIds.Length > 0 ? datasetIds[0] : Guid.Empty;
+
+        var maxDatasets = configuration.GetValue<int?>("Query:MaxDatasetsPerQuery") ?? 3;
+        if (datasetIds.Length is 0 || datasetIds.Length > maxDatasets)
+        {
+            return BuildMultiError(datasetIds, queryId, request.Sql, null, ErrorCodes.ValidationError,
+                $"Yêu cầu 1–{maxDatasets} dataset_ids.", sw.ElapsedMilliseconds);
+        }
+
+        var distinctIds = datasetIds.Distinct().ToArray();
+
+        var validation = validator.ValidateReadOnlySelect(request.Sql);
+        if (!validation.Success)
+        {
+            await LogAsync(queryId, primaryId, userId, request.Sql, null, "failed",
+                (int)sw.ElapsedMilliseconds, 0, null, null, validation.Code, validation.Message, distinctIds);
+            return BuildMultiError(distinctIds, queryId, request.Sql, null,
+                validation.Code!, validation.Message!, sw.ElapsedMilliseconds);
+        }
+
+        // Resolve + authorize every dataset: owned, ready, file-only, with a unique alias.
+        var resolved = new List<(DatasetRecord Dataset, List<DatasetTableRecord> Tables)>();
+        var seenAliases = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in distinctIds)
+        {
+            var dataset = await datasetService.GetDatasetRecordAsync(userId, id, ct);
+            if (dataset is null)
+            {
+                return BuildMultiError(distinctIds, queryId, request.Sql, null,
+                    ErrorCodes.DatasetNotFound, $"Dataset {id} không tồn tại.", sw.ElapsedMilliseconds);
+            }
+            if (!string.Equals(dataset.Status, "ready", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildMultiError(distinctIds, queryId, request.Sql, null,
+                    ErrorCodes.DatasetNotReady, $"Dataset {id} chưa sẵn sàng.", sw.ElapsedMilliseconds);
+            }
+            if (!string.Equals(dataset.SourceKind, "file", StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildMultiError(distinctIds, queryId, request.Sql, null,
+                    ErrorCodes.ExternalNotJoinable,
+                    "External datasets chưa hỗ trợ cross-dataset join; hãy query trực tiếp dataset đó (các bảng trong cùng connection join được với nhau).",
+                    sw.ElapsedMilliseconds);
+            }
+            if (string.IsNullOrWhiteSpace(dataset.Alias) || !seenAliases.Add(dataset.Alias))
+            {
+                return BuildMultiError(distinctIds, queryId, request.Sql, null,
+                    ErrorCodes.ValidationError, $"Dataset {id} thiếu alias hợp lệ hoặc trùng alias.", sw.ElapsedMilliseconds);
+            }
+            resolved.Add((dataset, await datasetService.GetTablesAsync(id, ct)));
+        }
+
+        var defaultLimit = configuration.GetValue<int?>("Query:DefaultLimit") ?? 100;
+        var hardCap = configuration.GetValue<int?>("Query:HardMaxRows") ?? 1000;
+        var maxRows = Math.Clamp(request.Options?.MaxRows ?? defaultLimit, 1, hardCap);
+        var executedSql = validator.ApplyLimit(validation.Sql!, maxRows);
+
+        try
+        {
+            using var conn = new DuckDBConnection("DataSource=:memory:");
+            conn.Open();
+            ExecNonQuery(conn, $"SET memory_limit='{configuration["Query:MemoryLimit"] ?? "1GB"}'");
+            var timeoutSec = configuration.GetValue<int?>("Query:TimeoutSeconds") ?? 30;
+
+            foreach (var (dataset, tables) in resolved)
+            {
+                var alias = dataset.Alias!;
+                ExecNonQuery(conn, $"CREATE SCHEMA IF NOT EXISTS \"{alias}\";");
+                var parquetDir = storage.GetParquetDirectory(userId, dataset.Id);
+                foreach (var t in tables)
+                {
+                    var parquetPath = Path.Combine(parquetDir, t.DataFileName)
+                        .Replace("\\", "/")
+                        .Replace("'", "''");
+                    ExecNonQuery(conn,
+                        $"CREATE VIEW \"{alias}\".\"{t.TableName}\" AS SELECT * FROM read_parquet('{parquetPath}');");
+                }
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = executedSql;
+            cmd.CommandTimeout = timeoutSec;
+
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            var columns = new List<object>(reader.FieldCount);
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                columns.Add(new { name = reader.GetName(i), type = reader.GetDataTypeName(i) });
+            }
+            var rows = new List<object?[]>();
+            while (await reader.ReadAsync(ct))
+            {
+                var row = new object?[reader.FieldCount];
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    row[i] = reader.IsDBNull(i) ? null : NormalizeValue(reader.GetValue(i));
+                }
+                rows.Add(row);
+            }
+
+            sw.Stop();
+            var result = new
+            {
+                format = "compact_table",
+                columns,
+                rows,
+                row_count = rows.Count,
+                truncated = rows.Count >= maxRows,
+                next_cursor = (string?)null
+            };
+
+            var confirmationScope = BuildConfirmationScope(userId, primaryId, executedSql);
+            var budgetDecision = aiTokenBudget.Decide(result, request.Options, confirmationScope);
+            var aiBudget = BuildAiBudget(budgetDecision);
+            var summary = BuildSummary(columns, rows, budgetDecision.Status == "blocked");
+
+            if (!budgetDecision.AllowRaw)
+            {
+                await LogAsync(queryId, primaryId, userId, request.Sql, executedSql, budgetDecision.Status,
+                    (int)sw.ElapsedMilliseconds, rows.Count, budgetDecision.EstimatedTokens, budgetDecision.Status, null, null, distinctIds);
+
+                if (budgetDecision.Status == "summary")
+                {
+                    return new
+                    {
+                        success = true,
+                        dataset_ids = distinctIds,
+                        query_id = queryId,
+                        status = "summary",
+                        result = (object?)null,
+                        summary,
+                        execution = new { engine = "duckdb", elapsed_ms = sw.ElapsedMilliseconds, max_rows = maxRows },
+                        sql = new { submitted = request.Sql, executed = executedSql },
+                        ai_budget = aiBudget,
+                        suggestions = BuildSuggestions(),
+                        error = (object?)null
+                    };
+                }
+
+                if (budgetDecision.Status == "blocked")
+                {
+                    return BuildTokenBudgetError(primaryId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
+                        summary, aiBudget, ErrorCodes.TokenBudgetHardLimitExceeded,
+                        $"Query result is estimated at {budgetDecision.EstimatedTokens} tokens, exceeding the hard maximum of {budgetDecision.HardMaxTokens} tokens.",
+                        "blocked");
+                }
+
+                return BuildTokenBudgetError(primaryId, queryId, request.Sql, executedSql, sw.ElapsedMilliseconds,
+                    summary, aiBudget, ErrorCodes.TokenBudgetConfirmationRequired,
+                    $"Query result is estimated at {budgetDecision.EstimatedTokens} tokens, exceeding the safe AI reading budget of {budgetDecision.SafeMaxTokens} tokens.",
+                    "requires_confirmation");
+            }
+
+            await LogAsync(queryId, primaryId, userId, request.Sql, executedSql, "completed",
+                (int)sw.ElapsedMilliseconds, rows.Count, budgetDecision.EstimatedTokens, budgetDecision.Status, null, null, distinctIds);
+
+            return new
+            {
+                success = true,
+                dataset_ids = distinctIds,
+                query_id = queryId,
+                status = "completed",
+                result,
+                execution = new { engine = "duckdb", elapsed_ms = sw.ElapsedMilliseconds, max_rows = maxRows },
+                sql = new { submitted = request.Sql, executed = executedSql },
+                warnings = Array.Empty<string>(),
+                error = (object?)null
+            };
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            var mapped = DuckDbErrorMapper.Map(ex.Message);
+            await LogAsync(queryId, primaryId, userId, request.Sql, executedSql, "failed",
+                (int)sw.ElapsedMilliseconds, 0, null, null, mapped.Code, ex.Message, distinctIds);
+            logger.LogWarning(ex, "Multi-dataset query failed: {Message}", ex.Message);
+            return BuildMultiError(distinctIds, queryId, request.Sql, executedSql, mapped.Code, mapped.Message, sw.ElapsedMilliseconds);
+        }
+    }
+
+    private static object BuildMultiError(Guid[] datasetIds, Guid queryId, string submittedSql, string? executedSql,
+        string code, string message, long elapsedMs) => new
+    {
+        success = false,
+        dataset_ids = datasetIds,
+        query_id = queryId,
+        status = "failed",
+        result = (object?)null,
+        execution = new { engine = "duckdb", elapsed_ms = elapsedMs },
+        sql = new { submitted = submittedSql, executed = executedSql },
+        warnings = Array.Empty<string>(),
+        error = new { code, message, retryable = code is "COLUMN_NOT_FOUND" or "TABLE_NOT_FOUND" or "INVALID_SQL" }
+    };
+
     private async Task<(string? Table, List<string> Suggestions)> SuggestColumnsAsync(
         Guid datasetId, string? hintedTable, string missingColumn, CancellationToken ct)
     {
@@ -326,6 +528,10 @@ public class DuckDbQueryService(
         // Make decimals JSON-friendly without losing precision for typical cases.
         decimal d => d,
         DateTime dt => dt.ToString("O"),
+        // DuckDB SUM/aggregate over integers returns HUGEINT → BigInteger, which System.Text.Json
+        // would otherwise serialize as its property bag ("is_power_of_two", …). Emit a real number
+        // (long when it fits, else a numeric string to preserve precision).
+        System.Numerics.BigInteger bi => bi >= long.MinValue && bi <= long.MaxValue ? (long)bi : bi.ToString(),
         _ => value
     };
 
@@ -427,7 +633,7 @@ public class DuckDbQueryService(
         Guid queryId, Guid datasetId, Guid userId,
         string submittedSql, string? executedSql, string status,
         int elapsedMs, int rowCount, int? estimatedTokens, string? aiBudgetStatus,
-        string? errorCode, string? errorMessage)
+        string? errorCode, string? errorMessage, Guid[]? datasetIds = null)
     {
         try
         {
@@ -435,10 +641,10 @@ public class DuckDbQueryService(
             await conn.ExecuteAsync("""
                 INSERT INTO query_logs
                     (id, dataset_id, user_id, sql_submitted, sql_executed, status,
-                     elapsed_ms, row_count, estimated_tokens, ai_budget_status, error_code, error_message)
+                     elapsed_ms, row_count, estimated_tokens, ai_budget_status, error_code, error_message, dataset_ids)
                 VALUES
                     (@Id, @DatasetId, @UserId, @SubmittedSql, @ExecutedSql, @Status,
-                     @ElapsedMs, @RowCount, @EstimatedTokens, @AiBudgetStatus, @ErrorCode, @ErrorMessage)
+                     @ElapsedMs, @RowCount, @EstimatedTokens, @AiBudgetStatus, @ErrorCode, @ErrorMessage, @DatasetIds)
                 """, new
             {
                 Id = queryId,
@@ -452,7 +658,8 @@ public class DuckDbQueryService(
                 EstimatedTokens = estimatedTokens,
                 AiBudgetStatus = aiBudgetStatus,
                 ErrorCode = errorCode,
-                ErrorMessage = errorMessage is null ? null : (errorMessage.Length > 4000 ? errorMessage[..4000] : errorMessage)
+                ErrorMessage = errorMessage is null ? null : (errorMessage.Length > 4000 ? errorMessage[..4000] : errorMessage),
+                DatasetIds = datasetIds
             });
         }
         catch (Exception ex)

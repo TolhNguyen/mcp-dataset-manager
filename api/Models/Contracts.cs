@@ -21,6 +21,7 @@ public record QueryOptions(
     string? ConfirmationId,
     string? ResponseMode);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
+public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options);
 
 public record CreateDatasetApiKeyRequest(string Name, bool? CanWrite = null);
 public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
@@ -51,7 +52,8 @@ public record DatasetRecord(
     DateTime CreatedAt,
     DateTime? ProcessedAt,
     string SourceKind,
-    Guid? ConnectionId
+    Guid? ConnectionId,
+    string? Alias
 );
 
 public record DatasetTableRecord(

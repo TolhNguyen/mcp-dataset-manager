@@ -123,14 +123,15 @@ public class ExternalSchemaService(
         }
 
         var externalTablesJson = JsonSerializer.Serialize(tables);
+        var alias = await DatasetService.GenerateUniqueAliasAsync(conn, userId, trimmedName, tx);
 
         await conn.ExecuteAsync("""
             INSERT INTO datasets
                 (id, user_id, name, original_file_name, file_type, stored_file_name, file_size_bytes,
-                 manifest_file_name, status, source_kind, connection_id, external_tables, include_samples, table_count)
+                 manifest_file_name, status, source_kind, connection_id, external_tables, include_samples, table_count, alias)
             VALUES
                 (@Id, @UserId, @Name, @OriginalFileName, @FileType, '', 0,
-                 'manifest.md', 'ready', 'external_db', @ConnectionId, CAST(@ExternalTables AS jsonb), @IncludeSamples, @TableCount)
+                 'manifest.md', 'ready', 'external_db', @ConnectionId, CAST(@ExternalTables AS jsonb), @IncludeSamples, @TableCount, @Alias)
             """, new
         {
             Id = datasetId,
@@ -141,7 +142,8 @@ public class ExternalSchemaService(
             ConnectionId = connectionId,
             ExternalTables = externalTablesJson,
             IncludeSamples = includeSamples,
-            TableCount = selected.Count
+            TableCount = selected.Count,
+            Alias = alias
         }, tx);
 
         await tx.CommitAsync(ct);

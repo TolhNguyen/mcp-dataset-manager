@@ -68,6 +68,71 @@ public static class KnowledgeEndpoints
         })
         .RequireAuthorization("KnowledgeWrite");
 
+        // Upload a .md/.txt document; split by heading into knowledge entries (kind=document).
+        app.MapPost("/api/datasets/{datasetId:guid}/knowledge/documents", async (
+            Guid datasetId, HttpContext ctx,
+            ClaimsPrincipal principal, DatasetService datasetService, KnowledgeService knowledgeService, CancellationToken ct) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+
+            var scopedDatasetId = principal.GetScopedDatasetId();
+            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
+            {
+                return Results.Forbid();
+            }
+
+            var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
+            if (dataset is null)
+            {
+                return Results.NotFound(new { success = false, error = new { code = ErrorCodes.DatasetNotFound, message = "Dataset not found." } });
+            }
+
+            if (!ctx.Request.HasFormContentType)
+            {
+                return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = "Content-Type phải là multipart/form-data." } });
+            }
+
+            var form = await ctx.Request.ReadFormAsync(ct);
+            var file = form.Files.GetFile("file");
+            if (file is null || file.Length == 0)
+            {
+                return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = "Cần một file .md hoặc .txt." } });
+            }
+
+            var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (ext is not (".md" or ".txt"))
+            {
+                return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = "Chỉ hỗ trợ .md hoặc .txt." } });
+            }
+            if (file.Length > 1024 * 1024)
+            {
+                return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = "File vượt quá 1MB." } });
+            }
+
+            string text;
+            using (var reader = new StreamReader(file.OpenReadStream()))
+            {
+                text = await reader.ReadToEndAsync(ct);
+            }
+
+            var sections = DocumentImporter.Split(text, Path.GetFileNameWithoutExtension(file.FileName));
+            var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
+
+            var imported = 0;
+            var skipped = 0;
+            foreach (var (title, content) in sections)
+            {
+                var res = await knowledgeService.CreateAsync(
+                    datasetId, new CreateKnowledgeRequest("document", title, content, false), source, actor, ct);
+                if (res.Success) imported++;
+                else { skipped++; if (res.Error?.Code == ErrorCodes.KnowledgeLimitReached) break; }
+            }
+
+            return Results.Ok(new { success = true, data = new { imported, skipped } });
+        })
+        .RequireAuthorization("KnowledgeWrite");
+
         app.MapPut("/api/datasets/{datasetId:guid}/knowledge/{entryId:guid}", async (
             Guid datasetId, Guid entryId, UpdateKnowledgeRequest req,
             ClaimsPrincipal principal, DatasetService datasetService, KnowledgeService knowledgeService, CancellationToken ct) =>

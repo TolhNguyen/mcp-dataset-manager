@@ -308,11 +308,32 @@ const Knowledge = {
                 this.showArchived = e.target.checked;
                 this.load();
             });
+            $('#knowledgeDocUpload').addEventListener('click', () => this.uploadDocument());
             this._bound = true;
         }
 
         $('#knowledgeCard').hidden = false;
         await this.load();
+    },
+
+    async uploadDocument() {
+        const input = $('#knowledgeDocFile');
+        const status = $('#knowledgeDocStatus');
+        const file = input.files && input.files[0];
+        if (!file) return;
+        status.hidden = false;
+        status.className = 'status-msg';
+        status.textContent = 'Đang tải lên…';
+        try {
+            const res = await Api.uploadKnowledgeDocument(this.datasetId, file);
+            const d = (res && res.data) || {};
+            status.textContent = `Đã thêm ${d.imported || 0} mục` + (d.skipped ? `, bỏ qua ${d.skipped}` : '') + '.';
+            input.value = '';
+            await this.load();
+        } catch (err) {
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Không tải được tài liệu.';
+        }
     },
 
     async load() {
