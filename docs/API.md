@@ -293,6 +293,113 @@ Các error code SQL: `INVALID_SQL`, `NON_READONLY_SQL`, `COLUMN_NOT_FOUND`, `TAB
 - Results above the hard budget return `TOKEN_BUDGET_HARD_LIMIT_EXCEEDED` and never return raw rows.
 - Claude/MCP clients should refine SQL by selecting fewer columns, adding filters, aggregating with `GROUP BY`, or using `response_mode = "summary"`.
 
+## External database connections (live query)
+
+Tất cả `JwtOnly`. Config connection được **mã hoá AES-256-GCM** trước khi lưu; response **không bao giờ** chứa password/service-account (host được mask).
+
+### POST `/api/connections`
+```json
+{ "name": "Shop PG", "provider": "postgresql",
+  "config": { "host": "db", "port": 5432, "database": "shop", "username": "ro", "password": "…", "ssl": true } }
+```
+BigQuery config: `{ "project_id": "…", "dataset": "…", "service_account_json": "<paste JSON string>", "max_bytes_billed": 1073741824 }`.
+Response (masked): `{ success, connection: { id, name, provider, host_masked, database, username, … } }`.
+
+### GET `/api/connections` · PUT `/api/connections/{id}` · DELETE `/api/connections/{id}`
+List (masked) / cập nhật (config chỉ ghi đè khi gửi kèm) / xoá. Xoá khi còn dataset tham chiếu → `CONNECTION_IN_USE`.
+
+### POST `/api/connections/{id}/test`
+Mở kết nối + `SELECT 1`; cảnh báo nếu tài khoản có quyền ghi. `{ success, data: { connection_id, success, warning, last_test_at } }`.
+
+### GET `/api/connections/{id}/tables`
+`{ success, tables: [ { queryable_name, source_label, column_count } ] }`.
+
+### POST `/api/connections/{id}/datasets`
+```json
+{ "name": "Khach hang", "tables": ["public.customers"], "include_samples": true }
+```
+Tạo dataset external (`source_kind='external_db'`, ready ngay). Chỉ lưu schema + 2 dòng mẫu/bảng (nếu `include_samples`).
+
+### POST `/api/datasets/{id}/refresh-schema`
+Đọc lại schema + sample rows từ nguồn.
+
+> Query dataset external dùng chính `POST /api/datasets/{id}/query` — server route theo `source_kind`, validate theo dialect, wrap row cap, chạy live. Lỗi: `EXTERNAL_QUERY_FAILED`, `TOO_MANY_CONCURRENT_QUERIES`.
+
+## Knowledge memory
+
+### GET `/api/datasets/{id}/knowledge?include_archived=&kind=` — `QueryAccess`
+`{ success, data: { entries: [ { id, kind, title, content, source, created_by, pinned, … } ] } }`.
+
+### POST `/api/datasets/{id}/knowledge` — `KnowledgeWrite`
+```json
+{ "kind": "metric_definition", "title": "Doanh thu thuần", "content": "…", "pinned": true }
+```
+`kind` ∈ note|column_meaning|business_rule|metric_definition|join_hint|document. Guardrail: ≤200 entry active/dataset, content ≤4000, title ≤255. Lỗi: `VALIDATION_ERROR`, `KNOWLEDGE_LIMIT_REACHED`.
+
+### PUT `/api/datasets/{id}/knowledge/{entryId}` — `KnowledgeWrite`
+### DELETE `/api/datasets/{id}/knowledge/{entryId}` — `KnowledgeWrite` (archive mềm)
+### DELETE `/api/datasets/{id}/knowledge/{entryId}/hard` — `JwtOnly` (xoá cứng)
+### POST `/api/datasets/{id}/knowledge/documents` — `KnowledgeWrite`
+Multipart `file` (.md/.txt ≤1MB) → tách theo heading thành entry `kind=document`. `{ success, data: { imported, skipped } }`.
+
+### GET `/api/knowledge/search?dataset_ids=a,b&q=…&limit=5` — `QueryAccess`
+Tìm accent-insensitive (unaccent + pg_trgm). Mọi thay đổi ghi `dataset_knowledge_revisions` (audit).
+
+Quyền ghi: JWT/PAT full; dataset-scoped key cần cột `can_write=true` (bật khi tạo key). Entry do dataset-key tạo có `source=ai`, `created_by="ai:<key name>"`.
+
+## Context (thay manifest.md làm nguồn schema cho AI)
+
+### GET `/api/context?dataset_ids=a,b&tables=orders&detail=summary|full` — `QueryAccess`
+```json
+{ "success": true,
+  "datasets": [ { "dataset_id","name","alias","source_kind","provider","dialect",
+    "tables": [ { "table_name","qualified_name":"alias.table","columns":[…],"sample_rows":[…] } ],
+    "knowledge": [ … ] } ],
+  "memory_instructions": "Bộ nhớ dataset có N entries. …",
+  "token_estimate": 1830, "warning": null }
+```
+`detail=full` = columns+aliases+sample_rows+knowledge; `summary` = rút gọn. Nếu vượt `Query:SafeMaxTokens` tự hạ summary + `warning`. Dataset-scoped key chỉ xin được đúng dataset của nó.
+
+## Multi-dataset query (file datasets)
+
+### POST `/api/query` — `QueryAccess`
+```json
+{ "dataset_ids": ["id1","id2"],
+  "sql": "SELECT … FROM sales.orders o JOIN crm.customers c ON …",
+  "options": { "max_rows": 100 } }
+```
+Mỗi dataset → schema DuckDB theo `alias`. Tối đa `Query:MaxDatasetsPerQuery` (3), tất cả `source_kind='file'`, thuộc user, `ready`. External → `EXTERNAL_NOT_JOINABLE`. Dataset-scoped key → 403 (không cross-dataset).
+
+## Dashboards
+
+### POST/GET `/api/dashboards` · GET/DELETE `/api/dashboards/{id}` — `JwtOnly`
+GET `{id}` trả dashboard + widget active. Tối đa 10 dashboard/user.
+
+### POST `/api/dashboards/{id}/widgets` — `KnowledgeWrite`
+```json
+{ "dataset_id":"…","title":"…","sql":"SELECT …","chart_type":"bar",
+  "chart_config":{…},"refresh_interval_sec":60 }
+```
+SQL **đóng băng**, validate lúc lưu (theo dialect) + chạy thử `LIMIT 1`. `chart_type` ∈ table|line|bar|pie|stat. `refresh_interval_sec` clamp ≥30. Tối đa 20 widget/dashboard. Dataset-scoped key chỉ tạo widget cho đúng dataset của nó.
+
+### PUT `.../widgets/{wid}` · DELETE `.../widgets/{wid}` (archive) — `KnowledgeWrite`
+### DELETE `.../widgets/{wid}/hard` — `JwtOnly`
+### GET `/api/dashboards/{id}/widgets/{wid}/data` — `JwtOnly`, rate-limited
+Chạy lại SQL đã đóng băng (re-validate + row cap `Dashboard:MaxRowsPerWidget` mặc định 1000 + timeout), cache in-memory theo TTL = refresh interval. Trả compact_table `{ columns, rows, row_count }` — **không** qua token budget (data đi ra browser).
+
+### POST `/api/dashboards/widgets` — `KnowledgeWrite` (MCP tiện lợi)
+Body kèm `dashboard_name` → tự tạo dashboard theo tên nếu chưa có, rồi tạo widget.
+
+## OAuth 2.1 cho MCP
+
+Không cần dán token — Claude tự khám phá và mở trang đăng nhập.
+
+- `GET /.well-known/oauth-authorization-server` · `GET /.well-known/oauth-protected-resource[/mcp]` — metadata (anonymous).
+- `POST /api/oauth/register` — Dynamic Client Registration (public client, PKCE).
+- `GET /oauth/authorize?response_type=code&client_id=…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…` — trang consent (đăng nhập + Cho phép).
+- `POST /api/oauth/authorize/approve` — (JWT) tạo authorization code, redirect về client.
+- `POST /api/oauth/token` — đổi code (PKCE `code_verifier`) lấy `{ access_token: "edm_pat_…", token_type: "Bearer" }`. Code single-use, TTL 5 phút. Access token chính là một PAT — hiển thị + thu hồi được trong UI.
+
 ## Health
 
 ### GET `/health`
