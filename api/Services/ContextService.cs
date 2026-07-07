@@ -119,8 +119,17 @@ public class ContextService(
         catch { return null; }
     }
 
-    // Dapper needs @DatasetId; the anonymous property name must match. We alias the record's Id.
     private sealed record TableRow(Guid Id, string TableName, string? SampleRowsJson);
-    private sealed record ColumnRow(Guid DatasetTableId, string Name, string? Type, string? DisplayName, string[]? Aliases);
     private sealed record KnowledgeRow(string Kind, string Title, string Content, string Source, bool Pinned);
+
+    // Class (not positional record) so Dapper maps the text[] `aliases` column via a property
+    // setter — Dapper's positional-constructor matching does not bind a string[] array param.
+    private sealed class ColumnRow
+    {
+        public Guid DatasetTableId { get; init; }
+        public string Name { get; init; } = "";
+        public string? Type { get; init; }
+        public string? DisplayName { get; init; }
+        public string[]? Aliases { get; init; }
+    }
 }

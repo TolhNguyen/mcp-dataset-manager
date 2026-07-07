@@ -528,6 +528,10 @@ public class DuckDbQueryService(
         // Make decimals JSON-friendly without losing precision for typical cases.
         decimal d => d,
         DateTime dt => dt.ToString("O"),
+        // DuckDB SUM/aggregate over integers returns HUGEINT → BigInteger, which System.Text.Json
+        // would otherwise serialize as its property bag ("is_power_of_two", …). Emit a real number
+        // (long when it fits, else a numeric string to preserve precision).
+        System.Numerics.BigInteger bi => bi >= long.MinValue && bi <= long.MaxValue ? (long)bi : bi.ToString(),
         _ => value
     };
 
