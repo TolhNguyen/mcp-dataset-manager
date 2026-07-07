@@ -53,6 +53,13 @@
         </form>
         <div id="knowledgeStatus" class="status-msg error" hidden></div>
 
+        <div class="form-row" style="align-items:center;gap:8px">
+            <label style="font-size:13px;color:#94a3b8">Tải tài liệu (.md/.txt) — tự tách theo tiêu đề thành các mục tri thức:</label>
+            <input type="file" id="knowledgeDocFile" accept=".md,.txt" />
+            <button type="button" id="knowledgeDocUpload">Tải lên</button>
+        </div>
+        <div id="knowledgeDocStatus" class="status-msg" hidden></div>
+
         <div class="form-row">
             <label><input type="checkbox" id="showArchivedKnowledge" /> Hiện đã lưu trữ</label>
         </div>
