@@ -25,6 +25,12 @@ public static class ErrorCodes
     public const string KnowledgeNotFound = "KNOWLEDGE_NOT_FOUND";
     public const string KnowledgeLimitReached = "KNOWLEDGE_LIMIT_REACHED";
 
+    // Dashboard
+    public const string DashboardNotFound = "DASHBOARD_NOT_FOUND";
+    public const string WidgetNotFound = "WIDGET_NOT_FOUND";
+    public const string DashboardLimitReached = "DASHBOARD_LIMIT_REACHED";
+    public const string WidgetLimitReached = "WIDGET_LIMIT_REACHED";
+
     // External DB connections / live-query datasets
     public const string ConnectionNotFound = "CONNECTION_NOT_FOUND";
     public const string ConnectionInUse = "CONNECTION_IN_USE";

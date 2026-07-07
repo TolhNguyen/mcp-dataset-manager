@@ -1,5 +1,9 @@
 namespace ExcelDatasetManager.Api.Models;
 
+public record Dashboard(
+    Guid Id, Guid UserId, string Name, string? Description, string CreatedBy,
+    DateTime CreatedAt, DateTime UpdatedAt);
+
 public record DashboardWidget(
     Guid Id, Guid DashboardId, Guid DatasetId, string Title, string Sql, string ChartType,
     string? ChartConfigJson, int RefreshIntervalSec, int Position, string Source, string CreatedBy,
