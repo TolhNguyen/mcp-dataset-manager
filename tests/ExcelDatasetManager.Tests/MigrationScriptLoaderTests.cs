@@ -51,4 +51,12 @@ public class MigrationScriptLoaderTests
         Assert.Contains("ADD COLUMN IF NOT EXISTS alias", m5.Sql);
         Assert.Contains("dataset_ids UUID[]", m5.Sql);
     }
+
+    [Fact]
+    public void Loads_dashboards_migration()
+    {
+        var m6 = MigrationScriptLoader.LoadAll(typeof(MigrationRunner).Assembly).Single(s => s.Version == 6);
+        Assert.Contains("dashboard_widgets", m6.Sql);
+        Assert.Contains("chart_type", m6.Sql);
+    }
 }
