@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Bảng điều khiển — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+    <h1><a href="/dashboard.html">Excel Dataset Manager</a></h1>
+    <div class="topbar-right">
+        <a href="/dashboard.html" class="btn-link">Dataset</a>
+        <a href="/connections.html" class="btn-link">Kết nối DB</a>
+        <span id="userEmail" class="muted"></span>
+        <button id="logoutBtn" class="btn-link">Đăng xuất</button>
+    </div>
+</header>
+
+<main class="container">
+    <section class="card">
+        <header class="card-head">
+            <h2>Bảng điều khiển</h2>
+            <button id="newDashboardBtn">+ Tạo dashboard</button>
+        </header>
+
+        <div id="dashboardList" class="dataset-list">
+            <p class="muted">Đang tải…</p>
+        </div>
+    </section>
+
+    <section class="card" id="detailCard" hidden>
+        <header class="card-head">
+            <div>
+                <h2 id="detailTitle"></h2>
+                <p class="muted" id="detailDescription"></p>
+            </div>
+            <div class="dataset-actions">
+                <button id="addWidgetBtn">+ Thêm widget</button>
+            </div>
+        </header>
+
+        <div id="widgetGrid" class="widget-grid"></div>
+    </section>
+</main>
+
+<!-- Create dashboard modal -->
+<div id="dashboardModal" class="modal-overlay" hidden>
+    <div class="modal">
+        <header class="modal-head">
+            <h2>Tạo dashboard</h2>
+            <button type="button" class="modal-close" id="closeDashboardModalBtn" aria-label="Đóng">&times;</button>
+        </header>
+
+        <form id="dashboardForm">
+            <label>
+                <span>Tên dashboard</span>
+                <input type="text" name="name" required maxlength="255" placeholder="Ví dụ: Doanh thu theo tháng" />
+            </label>
+            <label>
+                <span>Mô tả (tuỳ chọn)</span>
+                <textarea name="description" rows="2"></textarea>
+            </label>
+
+            <div id="dashboardFormStatus" class="status-msg" hidden></div>
+
+            <div class="dataset-actions">
+                <button type="submit">Tạo</button>
+                <button type="button" class="btn-link" id="cancelDashboardBtn">Huỷ</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Create/edit widget modal -->
+<div id="widgetModal" class="modal-overlay" hidden>
+    <div class="modal">
+        <header class="modal-head">
+            <h2 id="widgetModalTitle">Thêm widget</h2>
+            <button type="button" class="modal-close" id="closeWidgetModalBtn" aria-label="Đóng">&times;</button>
+        </header>
+
+        <form id="widgetForm">
+            <label>
+                <span>Dataset</span>
+                <select name="dataset_id" id="widgetDatasetSelect" required></select>
+            </label>
+            <label>
+                <span>Tiêu đề</span>
+                <input type="text" name="title" required maxlength="255" />
+            </label>
+            <label>
+                <span>Câu lệnh SQL (chỉ SELECT, tự đóng băng khi lưu)</span>
+                <textarea name="sql" rows="5" required placeholder="SELECT ... FROM ..."></textarea>
+            </label>
+            <label>
+                <span>Loại biểu đồ</span>
+                <select name="chart_type">
+                    <option value="table">Bảng</option>
+                    <option value="stat">Số liệu (stat)</option>
+                    <option value="line">Đường (line)</option>
+                    <option value="bar">Cột (bar)</option>
+                    <option value="pie">Tròn (pie)</option>
+                </select>
+            </label>
+            <label>
+                <span>Tự làm mới (giây, tối thiểu 30)</span>
+                <input type="number" name="refresh_interval_sec" min="30" value="60" />
+            </label>
+
+            <div id="widgetFormStatus" class="status-msg" hidden></div>
+
+            <div class="dataset-actions">
+                <button type="submit" id="saveWidgetBtn">Lưu</button>
+                <button type="button" class="btn-link" id="cancelWidgetBtn">Huỷ</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/js/api.js?v=20260707-dashboards-ui"></script>
+<script src="/js/auth.js?v=20260707-dashboards-ui"></script>
+<!-- Self-hosted Chart.js v4 (vendored, no CDN — CSP-safe). Guarded via `if (window.Chart)` in
+     dashboards.js so a missing/blocked file degrades to a text fallback instead of throwing. -->
+<script src="/js/chart.umd.min.js?v=20260707-dashboards-ui"></script>
+<script src="/js/dashboards.js?v=20260707-dashboards-ui"></script>
+<script>
+    DashboardsPage.init();
+</script>
+</body>
+</html>
