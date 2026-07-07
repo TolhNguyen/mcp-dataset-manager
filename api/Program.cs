@@ -240,6 +240,8 @@ builder.Services.AddScoped<ExternalSchemaService>();
 builder.Services.AddScoped<ExternalQueryService>();
 builder.Services.AddScoped<KnowledgeService>();
 builder.Services.AddScoped<ContextService>();
+builder.Services.AddScoped<DashboardService>();
+builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<SecretProtector>();
@@ -355,6 +357,7 @@ app.MapOAuthEndpoints();
 app.MapConnectionEndpoints();
 app.MapKnowledgeEndpoints();
 app.MapContextEndpoints();
+app.MapDashboardEndpoints();
 
 app.Run();
 

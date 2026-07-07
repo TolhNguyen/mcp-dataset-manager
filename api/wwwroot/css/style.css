@@ -498,3 +498,64 @@ code {
 }
 
 .table-pick-row:last-child { border-bottom: none; }
+
+/* ============================================================ */
+/* Dashboards (Phase D)                                          */
+/* ============================================================ */
+
+.dataset-item-active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 1px var(--primary);
+}
+
+.widget-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
+}
+
+.widget-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    background: var(--card-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.widget-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.widget-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin-bottom: 4px;
+}
+
+.widget-body {
+    min-height: 160px;
+}
+
+.stat-value {
+    font-size: 36px;
+    font-weight: 700;
+    text-align: center;
+    padding: 20px 0 4px;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.chart-canvas-wrap {
+    position: relative;
+    height: 220px;
+}

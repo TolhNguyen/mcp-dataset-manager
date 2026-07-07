@@ -19,7 +19,8 @@ public record QueryOptions(
     int? MaxTokens,
     bool? AllowLargeResult,
     string? ConfirmationId,
-    string? ResponseMode);
+    string? ResponseMode,
+    [property: System.Text.Json.Serialization.JsonIgnore] bool? BypassAiBudget = null);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
 public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options);
 
