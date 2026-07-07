@@ -1,0 +1,15 @@
+namespace ExcelDatasetManager.Api.Models;
+
+public record DashboardWidget(
+    Guid Id, Guid DashboardId, Guid DatasetId, string Title, string Sql, string ChartType,
+    string? ChartConfigJson, int RefreshIntervalSec, int Position, string Source, string CreatedBy,
+    DateTime? ArchivedAt, DateTime CreatedAt, DateTime UpdatedAt);
+
+public record CreateWidgetRequest(Guid? DatasetId, string? Title, string? Sql, string? ChartType,
+    System.Text.Json.JsonElement? ChartConfig, int? RefreshIntervalSec);
+public record UpdateWidgetRequest(string? Title, string? Sql, string? ChartType,
+    System.Text.Json.JsonElement? ChartConfig, int? RefreshIntervalSec, int? Position);
+public record CreateDashboardRequest(string? Name, string? Description);
+// MCP convenience: create a widget, auto-creating the dashboard by name if needed.
+public record CreateWidgetByDashboardNameRequest(string? DashboardName, Guid? DatasetId, string? Title,
+    string? Sql, string? ChartType, System.Text.Json.JsonElement? ChartConfig, int? RefreshIntervalSec);
