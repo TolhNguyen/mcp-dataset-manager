@@ -108,6 +108,7 @@ input[type="text"],
 input[type="email"],
 input[type="password"],
 input[type="number"],
+input[type="search"],
 input[type="file"],
 textarea {
     width: 100%;
@@ -411,10 +412,10 @@ code {
     inset: 0;
     background: rgba(15, 23, 42, 0.5);
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: center;
-    padding: 40px 16px;
-    overflow-y: auto;
+    padding: 16px;
+    overflow: hidden;
     z-index: 100;
 }
 
@@ -424,19 +425,46 @@ code {
     background: var(--card-bg);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    padding: 20px;
     width: 100%;
     max-width: 560px;
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 .modal-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    flex: 0 0 auto;
+    padding: 20px 20px 12px;
 }
 
 .modal-head h2 { margin: 0; font-size: 18px; }
+
+.modal > form {
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+}
+
+.modal-body,
+.wizard-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 20px 16px;
+}
+
+.modal-footer,
+.wizard-modal-footer {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    padding: 12px 20px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--card-bg);
+}
 
 .modal-close {
     background: transparent;
@@ -558,4 +586,86 @@ code {
 .chart-canvas-wrap {
     position: relative;
     height: 220px;
+}
+
+/* Create dataset wizard */
+.wizard-modal {
+    max-height: calc(100vh - 32px);
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    overflow: hidden;
+}
+
+.wizard-modal .modal-head {
+    flex: 0 0 auto;
+    padding: 20px 20px 12px;
+    margin-bottom: 0;
+}
+
+.wizard-modal > .status-msg {
+    flex: 0 0 auto;
+    margin: 0 20px 12px;
+}
+
+.wizard-form {
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+}
+
+.wizard-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 20px 16px;
+}
+
+.wizard-modal-footer {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    padding: 12px 20px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--card-bg);
+}
+
+.wizard-field-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.wizard-table-tools {
+    display: grid;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.wizard-table-search {
+    margin-bottom: 0;
+}
+
+.wizard-select-visible {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 0;
+    font-size: 14px;
+}
+
+.wizard-selection-summary {
+    font-size: 13px;
+}
+
+.wizard-table-list {
+    max-height: min(42vh, 360px);
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0 10px;
+}
+
+.wizard-footnote {
+    font-size: 13px;
+    margin-bottom: 0;
 }

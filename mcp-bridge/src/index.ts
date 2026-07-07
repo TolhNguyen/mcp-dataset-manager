@@ -297,6 +297,9 @@ async function runHttpServer() {
           const server = createProtocolServer(() => bridgeConfig);
           const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: () => randomUUID(),
+            // IIS ARR (và nhiều reverse proxy khác) buffer response nên SSE trên POST
+            // không bao giờ tới client — trả JSON thuần cho request/response.
+            enableJsonResponse: true,
             onsessioninitialized: (newSessionId) => {
               activeSessions.set(newSessionId, { transport, server, pat });
               log("info", `MCP session initialized: ${newSessionId}`);

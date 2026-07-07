@@ -10,6 +10,9 @@ const Connections = {
     editingId: null,      // null => creating a new connection
     editingProvider: null,
     wizardConnectionId: null,
+    wizardTables: [],
+    wizardTableFilter: '',
+    wizardSelectedTables: new Set(),
     // last_test_error is persisted server-side, but the "write permission" warning on a successful
     // test is not — keep it in memory just long enough to render it once after a manual Test click.
     testWarnings: {},
@@ -28,7 +31,9 @@ const Connections = {
 
         $('#closeWizardModalBtn').addEventListener('click', () => this.closeWizardModal());
         $('#cancelWizardBtn').addEventListener('click', () => this.closeWizardModal());
-        $('#wizardForm').addEventListener('submit', (e) => this.handleCreateDataset(e));
+        document.querySelector('#wizardForm').addEventListener('submit', (e) => this.handleCreateDataset(e));
+        document.querySelector('#wizardTableSearchInput').addEventListener('input', (e) => this.filterWizardTables(e.target.value));
+        document.querySelector('#wizardSelectVisibleTablesInput').addEventListener('change', (e) => this.toggleVisibleWizardTables(e.target.checked));
 
         await this.refresh();
     },
@@ -297,6 +302,13 @@ const Connections = {
         $('#wizardForm').reset();
         $('#includeSamplesInput').checked = true;
         $('#wizardNameInput').value = conn ? conn.name : '';
+        document.querySelector('#wizardTableSearchInput').value = '';
+        document.querySelector('#wizardSelectVisibleTablesInput').checked = false;
+        document.querySelector('#wizardSelectVisibleTablesInput').indeterminate = false;
+        this.wizardTables = [];
+        this.wizardTableFilter = '';
+        this.wizardSelectedTables = new Set();
+        this.updateWizardTableSelectionSummary();
         this.hideWizardStatus();
         $('#wizardTables').innerHTML = '<p class="muted">Đang tải danh sách bảng…</p>';
         $('#wizardModal').hidden = false;
@@ -310,19 +322,92 @@ const Connections = {
     },
 
     renderWizardTables(tables) {
-        const wrap = $('#wizardTables');
-        if (tables.length === 0) {
-            wrap.innerHTML = '<p class="muted">Không tìm thấy bảng nào trong cơ sở dữ liệu này.</p>';
+        this.wizardTables = Array.isArray(tables) ? tables : [];
+        this.wizardSelectedTables = new Set();
+        this.wizardTableFilter = '';
+        document.querySelector('#wizardTableSearchInput').value = '';
+        this.renderWizardTableRows();
+    },
+
+    filterWizardTables(value) {
+        this.wizardTableFilter = (value || '').trim().toLowerCase();
+        this.renderWizardTableRows();
+    },
+
+    getFilteredWizardTables() {
+        if (!this.wizardTableFilter) return this.wizardTables;
+        return this.wizardTables.filter(t => {
+            const label = ((t.source_label || '') + ' ' + (t.queryable_name || '')).toLowerCase();
+            return label.includes(this.wizardTableFilter);
+        });
+    },
+
+    renderWizardTableRows() {
+        const wrap = document.querySelector('#wizardTables');
+        const filtered = this.getFilteredWizardTables();
+
+        if (this.wizardTables.length === 0) {
+            wrap.innerHTML = '<p class=\'muted\'>Không tìm thấy bảng nào trong cơ sở dữ liệu này.</p>';
+            this.updateWizardTableSelectionSummary();
             return;
         }
 
-        wrap.innerHTML = tables.map(t => `
-            <label class="table-pick-row">
-                <input type="checkbox" name="table" value="${escapeHtml(t.queryable_name)}" />
-                <span>${escapeHtml(t.source_label || t.queryable_name)}</span>
-                <span class="muted">(${t.column_count} cột)</span>
-            </label>
-        `).join('');
+        if (filtered.length === 0) {
+            wrap.innerHTML = '<p class=\'muted\'>Không có bảng nào khớp với từ khóa tìm kiếm.</p>';
+            this.updateWizardTableSelectionSummary();
+            return;
+        }
+
+        wrap.innerHTML = filtered.map(t => {
+            const checked = this.wizardSelectedTables.has(t.queryable_name) ? ' checked' : '';
+            return '<label class=\'table-pick-row\'>' +
+                '<input type=\'checkbox\' name=\'table\' value=\'' + escapeHtml(t.queryable_name) + '\'' + checked + ' />' +
+                '<span>' + escapeHtml(t.source_label || t.queryable_name) + '</span>' +
+                '<span class=\'muted\'>(' + Number(t.column_count || 0) + ' cột)</span>' +
+                '</label>';
+        }).join('');
+
+        wrap.querySelectorAll('input[name=table]').forEach(input => {
+            input.addEventListener('change', () => {
+                if (input.checked) {
+                    this.wizardSelectedTables.add(input.value);
+                } else {
+                    this.wizardSelectedTables.delete(input.value);
+                }
+                this.updateWizardTableSelectionSummary();
+            });
+        });
+
+        this.updateWizardTableSelectionSummary();
+    },
+
+    toggleVisibleWizardTables(checked) {
+        this.getFilteredWizardTables().forEach(t => {
+            if (checked) {
+                this.wizardSelectedTables.add(t.queryable_name);
+            } else {
+                this.wizardSelectedTables.delete(t.queryable_name);
+            }
+        });
+        this.renderWizardTableRows();
+    },
+
+    updateWizardTableSelectionSummary() {
+        const selected = this.wizardSelectedTables.size;
+        const total = this.wizardTables.length;
+        const visible = this.getFilteredWizardTables().length;
+        const selectVisible = document.querySelector('#wizardSelectVisibleTablesInput');
+        const summary = document.querySelector('#wizardTableSelectionSummary');
+
+        if (summary) {
+            summary.textContent = selected + '/' + total + ' bảng được chọn' + (visible !== total ? ' - ' + visible + ' đang hiển thị' : '');
+        }
+
+        if (!selectVisible) return;
+        const visibleSelected = this.getFilteredWizardTables().filter(t => this.wizardSelectedTables.has(t.queryable_name)).length;
+        selectVisible.disabled = visible === 0;
+        selectVisible.checked = visible > 0 && visibleSelected === visible;
+        selectVisible.indeterminate = visibleSelected > 0 && visibleSelected < visible;
     },
 
     closeWizardModal() {
@@ -343,7 +428,7 @@ const Connections = {
 
         const name = $('#wizardNameInput').value.trim();
         const includeSamples = $('#includeSamplesInput').checked;
-        const tables = Array.from($$('#wizardTables input[name="table"]:checked')).map(el => el.value);
+        const tables = Array.from(this.wizardSelectedTables);
 
         const status = $('#wizardStatus');
         const btn = $('#createWizardDatasetBtn');

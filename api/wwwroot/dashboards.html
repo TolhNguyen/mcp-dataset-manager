@@ -53,6 +53,7 @@
         </header>
 
         <form id="dashboardForm">
+            <div class="modal-body">
             <label>
                 <span>Tên dashboard</span>
                 <input type="text" name="name" required maxlength="255" placeholder="Ví dụ: Doanh thu theo tháng" />
@@ -64,7 +65,8 @@
 
             <div id="dashboardFormStatus" class="status-msg" hidden></div>
 
-            <div class="dataset-actions">
+            </div>
+            <div class="dataset-actions modal-footer">
                 <button type="submit">Tạo</button>
                 <button type="button" class="btn-link" id="cancelDashboardBtn">Huỷ</button>
             </div>
@@ -81,6 +83,7 @@
         </header>
 
         <form id="widgetForm">
+            <div class="modal-body">
             <label>
                 <span>Dataset</span>
                 <select name="dataset_id" id="widgetDatasetSelect" required></select>
@@ -110,7 +113,8 @@
 
             <div id="widgetFormStatus" class="status-msg" hidden></div>
 
-            <div class="dataset-actions">
+            </div>
+            <div class="dataset-actions modal-footer">
                 <button type="submit" id="saveWidgetBtn">Lưu</button>
                 <button type="button" class="btn-link" id="cancelWidgetBtn">Huỷ</button>
             </div>

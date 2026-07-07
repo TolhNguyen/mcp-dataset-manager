@@ -281,8 +281,12 @@ public class DbConnectionService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "ListTablesAsync failed for connection {ConnectionId}", id);
-            return ApiResult<object>.Fail(ErrorCodes.ExternalSchemaFetchFailed, "Could not list tables from the source database.");
+            // Never log/return the raw exception: a driver may echo the connection string / credentials.
+            var scrubbed = config.Scrub(ex.Message);
+            logger.LogWarning("ListTablesAsync failed for connection {ConnectionId}: {Error}", id, scrubbed);
+            return ApiResult<object>.Fail(
+                ErrorCodes.ExternalSchemaFetchFailed,
+                $"Could not list tables from the source database: {scrubbed}");
         }
     }
 

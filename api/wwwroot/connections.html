@@ -42,12 +42,13 @@
             <button type="button" class="modal-close" id="closeConnectionModalBtn" aria-label="Đóng">&times;</button>
         </header>
 
+
+        <form id="connectionForm">
+            <div class="modal-body">
         <div class="warning-banner">
             ⚠️ Hãy dùng tài khoản CHỈ có quyền SELECT (read-only). EDM không bao giờ ghi vào DB của bạn,
             nhưng tài khoản read-only là lớp bảo vệ quan trọng nhất.
         </div>
-
-        <form id="connectionForm">
             <label>
                 <span>Tên kết nối</span>
                 <input type="text" name="name" id="connectionNameInput" required placeholder="Ví dụ: DB sản xuất" />
@@ -106,8 +107,9 @@
             </div>
 
             <div id="connectionFormStatus" class="status-msg" hidden></div>
+            </div>
 
-            <div class="dataset-actions">
+            <div class="dataset-actions modal-footer">
                 <button type="submit" id="saveConnectionBtn">Lưu kết nối</button>
                 <button type="button" class="btn-link" id="cancelConnectionBtn">Huỷ</button>
             </div>
@@ -117,7 +119,7 @@
 
 <!-- Create-dataset-from-connection wizard -->
 <div id="wizardModal" class="modal-overlay" hidden>
-    <div class="modal">
+    <div class="modal wizard-modal">
         <header class="modal-head">
             <h2>Tạo dataset từ kết nối</h2>
             <button type="button" class="modal-close" id="closeWizardModalBtn" aria-label="Đóng">&times;</button>
@@ -125,15 +127,27 @@
 
         <div id="wizardStatus" class="status-msg" hidden></div>
 
-        <form id="wizardForm">
+        <form id="wizardForm" class="wizard-form">
+            <div class="wizard-modal-body">
             <label>
                 <span>Tên dataset</span>
                 <input type="text" name="name" id="wizardNameInput" required placeholder="Ví dụ: Đơn hàng - DB sản xuất" />
             </label>
 
             <div>
-                <span class="muted" style="display:block;margin-bottom:4px;font-size:13px">Chọn bảng</span>
-                <div id="wizardTables" class="table-scroll">
+                <span class="muted wizard-field-label">Chọn bảng</span>
+                <div class="wizard-table-tools">
+                    <label class="wizard-table-search">
+                        <span>Tìm bảng</span>
+                        <input type="search" id="wizardTableSearchInput" placeholder="Nhập tên bảng..." autocomplete="off" />
+                    </label>
+                    <label class="wizard-select-visible">
+                        <input type="checkbox" id="wizardSelectVisibleTablesInput" />
+                        Chọn tất cả bảng đang hiển thị
+                    </label>
+                    <div id="wizardTableSelectionSummary" class="muted wizard-selection-summary">0 bảng được chọn</div>
+                </div>
+                <div id="wizardTables" class="table-scroll wizard-table-list">
                     <p class="muted">Đang tải danh sách bảng…</p>
                 </div>
             </div>
@@ -145,12 +159,14 @@
                 </label>
             </div>
 
-            <p class="muted" style="font-size:13px">
+            <p class="muted wizard-footnote">
                 EDM chỉ lưu cấu trúc bảng và 2 dòng mẫu. Dữ liệu của bạn không được sao chép —
                 AI truy vấn trực tiếp DB nguồn.
             </p>
 
-            <div class="dataset-actions">
+            </div>
+
+            <div class="dataset-actions wizard-modal-footer">
                 <button type="submit" id="createWizardDatasetBtn">Tạo dataset</button>
                 <button type="button" class="btn-link" id="cancelWizardBtn">Huỷ</button>
             </div>
