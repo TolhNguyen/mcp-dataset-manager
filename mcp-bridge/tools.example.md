@@ -122,25 +122,41 @@ response_hint: |
   new files until they delete one.
 ```
 
-## get_dataset_schema
+## get_context
 
 ```yaml
 type: tool
-name: get_dataset_schema
+name: get_context
 description: |
-  Fetch the manifest.md for a dataset — describes tables, normalized SQL column
-  names, inferred types, sample values, and Vietnamese aliases. ALWAYS call this
-  before writing SQL against a dataset you haven't queried yet; original headers
-  are normalized and cannot be guessed.
+  Fetch structured schema + business-knowledge memory for one or more datasets
+  BEFORE writing SQL or planning an analysis. Returns each dataset's alias, tables,
+  columns (normalized SQL names + Vietnamese display names/aliases), sample rows,
+  dialect, and its knowledge memory + memory_instructions. ALWAYS call this first;
+  original headers are normalized and cannot be guessed. Use dataset alias.table in
+  multi-dataset queries. Honor memory_instructions: save new business facts via
+  save_dataset_knowledge.
 connection: edm
 method: GET
-path: /api/datasets/{dataset_id}/download/manifest
+path: /api/context
 params:
-  dataset_id:
-    in: path
+  dataset_ids:
+    in: query
     type: string
     required: true
-    description: UUID from list_datasets.
+    description: One or more dataset UUIDs, comma-separated (max 3).
+  tables:
+    in: query
+    type: string
+    description: Optional comma-separated table names to include only (reduces tokens).
+  detail:
+    in: query
+    type: string
+    enum: [summary, full]
+    description: full (default) = columns+aliases+sample rows+knowledge; summary = trimmed.
+response_hint: |
+  datasets[].tables[].qualified_name is what you reference in SQL (alias.table).
+  If warning is present the payload was auto-downgraded to summary — pass tables= to
+  get full detail for just the tables you need.
 ```
 
 ## query_dataset
@@ -181,6 +197,49 @@ response_hint: |
   On error.code=COLUMN_NOT_FOUND, error.details.suggested_columns contains likely
   fixes — retry with the suggested name.
   On error.code=DATASET_NOT_READY, wait and retry (parsing is async).
+```
+
+## query_datasets
+
+```yaml
+type: tool
+name: query_datasets
+description: |
+  Run one read-only SQL query that JOINs across several FILE datasets. Each dataset
+  is a schema named by its alias (from get_context): SELECT ... FROM sales.orders o
+  JOIN crm.customers c ON ... Only file (uploaded) datasets are joinable; external
+  database datasets are not — query those one at a time with query_dataset.
+connection: edm
+method: POST
+path: /api/query
+params:
+  dataset_ids:
+    in: body
+    type: array
+    items:
+      type: string
+    required: true
+    description: 2-3 file dataset UUIDs to join.
+  sql:
+    in: body
+    type: string
+    required: true
+    description: A single SELECT/WITH statement referencing alias.table names.
+  max_rows:
+    in: body
+    type: integer
+    default: 100
+    description: 1-1000.
+body_template: |
+  {
+    "dataset_ids": {{dataset_ids | json}},
+    "sql": {{sql | json}},
+    "options": { "max_rows": {{max_rows}} }
+  }
+response_hint: |
+  Success path: result.columns + result.rows.
+  On error.code=EXTERNAL_NOT_JOINABLE, one of the ids is an external DB dataset —
+  query it alone with query_dataset instead.
 ```
 
 ## upload_dataset
