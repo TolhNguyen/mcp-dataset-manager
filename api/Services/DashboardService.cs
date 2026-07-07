@@ -480,9 +480,13 @@ public class DashboardService(
         }
 
         var maxRows = configuration.GetValue<int?>("Dashboard:MaxRowsPerWidget") ?? 1000;
+        // BypassAiBudget: widget data goes straight to the browser, not an AI reader, so the AI
+        // token-reading budget must not gate it — only the row cap (maxRows) and command timeout
+        // (enforced inside the query service) apply.
         var request = new QueryRequest("sql", revalidation.Sql!, new QueryOptions(
             MaxRows: maxRows, ReturnFormat: null, IncludeSql: null, IncludeProfile: null,
-            MaxTokens: null, AllowLargeResult: null, ConfirmationId: null, ResponseMode: null));
+            MaxTokens: null, AllowLargeResult: null, ConfirmationId: null, ResponseMode: null,
+            BypassAiBudget: true));
 
         var raw = await ExecuteQueryAsync(userId, dataset, request, ct);
         var outcome = QueryOutcomeReader.Extract(raw);

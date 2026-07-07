@@ -136,7 +136,11 @@ public class ExternalQueryService(
                 var aiBudget = BuildAiBudget(budgetDecision);
                 var summary = BuildSummary(columns, rows, budgetDecision.Status == "blocked");
 
-                if (!budgetDecision.AllowRaw)
+                // Dashboard widgets set BypassAiBudget: their result goes straight to the browser,
+                // not an AI reader, so the AI token-reading budget is irrelevant to them. The row
+                // cap (maxRows, above) and the command timeout remain the real safety bounds
+                // regardless. Kept in sync with DuckDbQueryService — same skip, same reasoning.
+                if (!budgetDecision.AllowRaw && request.Options?.BypassAiBudget != true)
                 {
                     await LogAsync(queryId, datasetId, userId, request.Sql, executedSql, budgetDecision.Status,
                         (int)sw.ElapsedMilliseconds, rows.Count, budgetDecision.EstimatedTokens, budgetDecision.Status, null, null);
