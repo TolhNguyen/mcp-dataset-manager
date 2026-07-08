@@ -251,6 +251,7 @@ public class DuckDbQueryService(
                     code = mapped.Code,
                     message = mapped.Message,
                     details,
+                    assistant_instruction = AssistantInstructions.NeverFabricate,
                     retryable = mapped.Code is "COLUMN_NOT_FOUND" or "TABLE_NOT_FOUND" or "INVALID_SQL"
                 },
                 retry_hint = retryHint
@@ -466,7 +467,13 @@ public class DuckDbQueryService(
         execution = new { engine = "duckdb", elapsed_ms = elapsedMs },
         sql = new { submitted = submittedSql, executed = executedSql },
         warnings = Array.Empty<string>(),
-        error = new { code, message, retryable = code is "COLUMN_NOT_FOUND" or "TABLE_NOT_FOUND" or "INVALID_SQL" }
+        error = new
+        {
+            code,
+            message,
+            assistant_instruction = AssistantInstructions.NeverFabricate,
+            retryable = code is "COLUMN_NOT_FOUND" or "TABLE_NOT_FOUND" or "INVALID_SQL"
+        }
     };
 
     private async Task<(string? Table, List<string> Suggestions)> SuggestColumnsAsync(
@@ -564,6 +571,7 @@ public class DuckDbQueryService(
             {
                 code,
                 message,
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = code is "COLUMN_NOT_FOUND" or "TABLE_NOT_FOUND" or "INVALID_SQL"
             }
         };
@@ -596,6 +604,7 @@ public class DuckDbQueryService(
             {
                 code,
                 message,
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = true
             },
             suggestions = BuildSuggestions()

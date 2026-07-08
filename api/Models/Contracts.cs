@@ -20,11 +20,13 @@ public record QueryOptions(
     bool? AllowLargeResult,
     string? ConfirmationId,
     string? ResponseMode,
-    [property: System.Text.Json.Serialization.JsonIgnore] bool? BypassAiBudget = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] bool? BypassAiBudget = null,
+    string? SchemaToken = null);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
-public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options);
+public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options, Dictionary<string, string>? SchemaTokens = null);
 
-public record CreateDatasetApiKeyRequest(string Name, bool? CanWrite = null);
+public record CreateUserApiKeyRequest(string Name);
+public record UpdateDatasetSettingsRequest(bool? AiCanWriteKnowledge);
 public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
 public record OAuthApproveRequest(
     string? ClientId, string? RedirectUri, string? CodeChallenge, string? CodeChallengeMethod, string? State);
@@ -54,7 +56,8 @@ public record DatasetRecord(
     DateTime? ProcessedAt,
     string SourceKind,
     Guid? ConnectionId,
-    string? Alias
+    string? Alias,
+    bool AiCanWriteKnowledge
 );
 
 public record DatasetTableRecord(

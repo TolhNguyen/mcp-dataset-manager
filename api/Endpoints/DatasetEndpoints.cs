@@ -51,6 +51,28 @@ public static class DatasetEndpoints
                 : Results.NotFound(new { success = false, error = result.Error });
         });
 
+        datasets.MapPatch("/{datasetId:guid}/settings", async (
+            Guid datasetId, UpdateDatasetSettingsRequest req,
+            ClaimsPrincipal principal, DatasetService svc, CancellationToken ct) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+
+            if (req.AiCanWriteKnowledge is null)
+            {
+                return Results.BadRequest(new
+                {
+                    success = false,
+                    error = new { code = ErrorCodes.ValidationError, message = "ai_can_write_knowledge is required." }
+                });
+            }
+
+            var ok = await svc.SetAiCanWriteKnowledgeAsync(userId.Value, datasetId, req.AiCanWriteKnowledge.Value, ct);
+            return ok
+                ? Results.Ok(new { success = true, data = new { ai_can_write_knowledge = req.AiCanWriteKnowledge.Value } })
+                : Results.NotFound(new { success = false, error = new { code = ErrorCodes.DatasetNotFound, message = "Dataset not found." } });
+        }).RequireAuthorization("JwtOnly");
+
         datasets.MapDelete("/{datasetId:guid}", async (Guid datasetId, ClaimsPrincipal principal, DatasetService svc, CancellationToken ct) =>
         {
             var userId = principal.GetUserId()!.Value;

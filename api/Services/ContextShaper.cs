@@ -23,7 +23,9 @@ public record ContextDatasetInput(
     string Dialect,
     IReadOnlyList<ContextTableInput> Tables,
     IReadOnlyList<ContextKnowledgeInput> Knowledge,
-    int ActiveKnowledgeCount);
+    int ActiveKnowledgeCount,
+    string SchemaToken,
+    IReadOnlyList<string> DialectNotes);
 
 public record ContextShapeResult(object Payload, bool Downgraded, int TokenEstimate);
 
@@ -77,6 +79,8 @@ public static class ContextShaper
             source_kind = d.SourceKind,
             provider = d.Provider,
             dialect = d.Dialect,
+            dialect_notes = d.DialectNotes,
+            schema_token = d.SchemaToken,
             tables = d.Tables
                 .Where(t => tableFilter is null || tableFilter.Contains(t.TableName))
                 .Select(t => (object)new

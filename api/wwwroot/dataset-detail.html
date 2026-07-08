@@ -72,35 +72,18 @@
         <div id="tables"></div>
     </section>
 
-    <section class="card" id="apiKeysCard" hidden>
+    <section class="card" id="datasetSettingsCard" hidden>
         <header class="card-head">
-            <h2>API key cho Claude / MCP</h2>
+            <h2>Quyền AI ghi tri thức</h2>
         </header>
         <p class="muted">
-            API key cho phép Claude hoặc client khác truy vấn dataset này mà không cần mật khẩu của bạn.
-            Mỗi key chỉ truy cập đúng dataset này (read-only).
+            Khi bật, Claude/MCP được phép lưu và cập nhật ghi chú nghiệp vụ (knowledge) cho dataset này. Tắt cho dữ liệu nhạy cảm.
         </p>
-
-        <form id="newKeyForm" class="inline-form">
-            <input type="text" name="name" required placeholder="Tên dễ nhớ, ví dụ: claude-desktop" />
-            <label><input type="checkbox" name="can_write" /> Cho phép AI ghi tri thức (can_write)</label>
-            <button type="submit">Tạo API key</button>
-        </form>
-
-        <div id="newKeyResult" class="status-msg" hidden></div>
-
-        <table class="data-table" id="apiKeyTable">
-            <thead>
-            <tr>
-                <th>Tên</th>
-                <th>Tạo lúc</th>
-                <th>Lần dùng cuối</th>
-                <th>Trạng thái</th>
-                <th></th>
-            </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
+        <label class="form-row" style="align-items:center;gap:8px">
+            <input type="checkbox" id="aiKnowledgeWriteToggle" />
+            <span>Cho phép AI ghi tri thức</span>
+        </label>
+        <div id="datasetSettingsStatus" class="status-msg" hidden></div>
     </section>
 
     <section class="card" id="queryCard" hidden>
@@ -131,7 +114,6 @@
 <script src="/js/api.js?v=20260529-token-guard"></script>
 <script src="/js/auth.js?v=20260529-token-guard"></script>
 <script src="/js/dataset-detail.js?v=20260529-token-guard"></script>
-<script src="/js/api-keys.js?v=20260529-token-guard"></script>
 <script>
     DatasetDetail.init();
 </script>

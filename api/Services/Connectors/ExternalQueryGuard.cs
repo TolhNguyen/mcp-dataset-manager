@@ -98,9 +98,52 @@ public static class ExternalQueryGuard
             return QueryValidationResult.Fail("NON_READONLY_SQL", "Dangerous PostgreSQL function is not allowed.");
         }
 
+        if (provider == ExternalDbProviders.MsSql
+            && Regex.IsMatch(scrubbed, @"\[[^\]\[]*\.[^\]\[]*\]"))
+        {
+            return QueryValidationResult.Fail("SQL_INVALID_IDENTIFIER_QUOTING",
+                "Use [dbo].[table] or dbo.table - [dbo.table] is a single identifier and will not resolve.");
+        }
+
+        if (Regex.IsMatch(scrubbed, @"@[A-Za-z_][A-Za-z0-9_]*"))
+        {
+            return QueryValidationResult.Fail("SQL_PARAMETERS_NOT_SUPPORTED",
+                "Query parameters like @name are not supported. Inline literal values, e.g. '2026-06-01'.");
+        }
+
+        if (Regex.IsMatch(trimmed, @"^\s*with\b", RegexOptions.IgnoreCase)
+            && !HasTopLevelSelectAfterCtes(scrubbed))
+        {
+            return QueryValidationResult.Fail("SQL_INCOMPLETE",
+                "Your WITH block has no final SELECT. Append the main SELECT after the last CTE.");
+        }
+
         // Return the original SQL (not the scrubbed version) so the target database sees the user's exact intent.
         var cleanedOriginal = sql.Trim().TrimEnd(';').Trim();
         return QueryValidationResult.Ok(cleanedOriginal);
+    }
+
+    private static bool HasTopLevelSelectAfterCtes(string scrubbed)
+    {
+        var depth = 0;
+        var lastTopLevelCloseParen = -1;
+        for (var i = 0; i < scrubbed.Length; i++)
+        {
+            var ch = scrubbed[i];
+            if (ch == '(')
+            {
+                depth++;
+            }
+            else if (ch == ')')
+            {
+                depth--;
+                if (depth == 0) lastTopLevelCloseParen = i;
+            }
+        }
+
+        if (lastTopLevelCloseParen < 0) return false;
+        var tail = scrubbed[(lastTopLevelCloseParen + 1)..];
+        return Regex.IsMatch(tail, @"\bselect\b", RegexOptions.IgnoreCase);
     }
 
     public static string ApplyRowCap(string sql, string provider, int maxRows)

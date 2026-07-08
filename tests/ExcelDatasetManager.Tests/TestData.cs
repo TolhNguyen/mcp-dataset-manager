@@ -38,7 +38,8 @@ internal static class TestData
         ProcessedAt: DateTime.UtcNow,
         SourceKind: "file",
         ConnectionId: null,
-        Alias: "orders");
+        Alias: "orders",
+        AiCanWriteKnowledge: true);
 
     public static ParsedTable NewParsedTable() => new(
         SourceName: "orders",

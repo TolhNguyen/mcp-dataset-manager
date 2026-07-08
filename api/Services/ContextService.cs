@@ -60,7 +60,7 @@ public class ContextService(
     {
         var alias = dataset.Alias ?? "ds";
         var isExternal = string.Equals(dataset.SourceKind, "external_db", StringComparison.OrdinalIgnoreCase);
-        var dialect = isExternal ? (dataset.FileType /* provider */) : "duckdb";
+        var dialect = DialectNotes.MapDialect(dataset.SourceKind, dataset.FileType);
 
         var tableRows = (await conn.QueryAsync<TableRow>("""
             SELECT id AS Id, table_name AS TableName, sample_rows::text AS SampleRowsJson
@@ -100,6 +100,12 @@ public class ContextService(
             .Select(k => new ContextKnowledgeInput(k.Kind, k.Title, k.Content, k.Source, k.Pinned))
             .ToList();
 
+        var schemaToken = SchemaTokenService.Compute(
+            tables.Select(t => (
+                t.TableName,
+                (IReadOnlyList<(string, string)>)t.Columns.Select(c => (c.Name, c.Type)).ToList())));
+        var notes = DialectNotes.For(dialect);
+
         return new ContextDatasetInput(
             DatasetId: dataset.Id,
             Name: dataset.Name,
@@ -109,7 +115,9 @@ public class ContextService(
             Dialect: dialect,
             Tables: tables,
             Knowledge: knowledge,
-            ActiveKnowledgeCount: activeCount);
+            ActiveKnowledgeCount: activeCount,
+            SchemaToken: schemaToken,
+            DialectNotes: notes);
     }
 
     private static List<object?[]>? ParseSampleRows(string? json)

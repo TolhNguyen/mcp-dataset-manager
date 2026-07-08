@@ -227,6 +227,8 @@ public class ExternalQueryService(
                 // Never log the raw exception (ex) here — ex.Message/stack can echo the connection string
                 // or other secret material from the DB driver. Only the sanitized message is safe to log.
                 logger.LogWarning("External query failed for dataset {DatasetId} ({Provider}): {Error}", datasetId, provider, message);
+                var (knownTables, knownColumns) = await LoadKnownSchemaAsync(datasetId, ct);
+                var details = ExternalErrorEnricher.Enrich(provider, message, knownTables, knownColumns);
 
                 return new
                 {
@@ -242,8 +244,9 @@ public class ExternalQueryService(
                     {
                         code = ErrorCodes.ExternalQueryFailed,
                         message,
-                        details = (object?)null,
-                        retryable = false
+                        details,
+                        assistant_instruction = "Fix the SQL using error.details (available_tables / did_you_mean / hint). Retry at most twice. If it still fails, report this error to the user verbatim and never fabricate data.",
+                        retryable = details is not null
                     }
                 };
             }
@@ -273,6 +276,7 @@ public class ExternalQueryService(
             {
                 code,
                 message,
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = false
             }
         };
@@ -295,6 +299,7 @@ public class ExternalQueryService(
             {
                 code = ErrorCodes.TooManyConcurrentQueries,
                 message = "Too many concurrent queries are running against this connection. Please retry shortly.",
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = true
             }
         };
@@ -328,6 +333,7 @@ public class ExternalQueryService(
             {
                 code,
                 message,
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = true
             },
             suggestions = BuildSuggestions()
@@ -372,6 +378,27 @@ public class ExternalQueryService(
 
     private static string BuildConfirmationScope(Guid userId, Guid datasetId, string sql) =>
         $"{userId:N}:{datasetId:N}:{sql}";
+
+    private async Task<(List<string> Tables, List<string> Columns)> LoadKnownSchemaAsync(Guid datasetId, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = await dataSource.OpenConnectionAsync(ct);
+            var tables = (await conn.QueryAsync<string>(
+                "SELECT table_name FROM dataset_tables WHERE dataset_id = @Id ORDER BY table_name",
+                new { Id = datasetId })).ToList();
+            var columns = (await conn.QueryAsync<string>("""
+                SELECT DISTINCT c.normalized_name
+                FROM dataset_columns c JOIN dataset_tables t ON t.id = c.dataset_table_id
+                WHERE t.dataset_id = @Id
+                """, new { Id = datasetId })).ToList();
+            return (tables, columns);
+        }
+        catch
+        {
+            return (new List<string>(), new List<string>());
+        }
+    }
 
     private async Task LogAsync(
         Guid queryId, Guid datasetId, Guid userId,

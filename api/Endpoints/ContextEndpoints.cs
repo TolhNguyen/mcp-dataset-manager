@@ -9,23 +9,31 @@ public static class ContextEndpoints
     public static void MapContextEndpoints(this WebApplication app)
     {
         app.MapGet("/api/context", async (
-            string? dataset_ids, string? tables, string? detail,
-            ClaimsPrincipal principal, ContextService svc, CancellationToken ct) =>
+            string? dataset_ids, string? tables, string? detail, string? guide_token,
+            ClaimsPrincipal principal, ContextService svc, QueryGuideService guide, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
+
+            if (principal.IsApiKeyPrincipal()
+                && !SchemaTokenLikeMatch(guide_token, guide.CurrentToken()))
+            {
+                return Results.Json(new
+                {
+                    success = false,
+                    error = new
+                    {
+                        code = "GUIDE_REQUIRED",
+                        message = "Call get_query_guide and READ it first, then pass the guide_token it returns.",
+                        assistant_instruction = "Do not guess schema or fabricate data. Call get_query_guide, read it, then retry get_context with the guide_token."
+                    }
+                }, statusCode: 400);
+            }
 
             var ids = ParseGuidCsv(dataset_ids);
             if (ids is null)
             {
                 return Results.BadRequest(new { success = false, error = new { code = "VALIDATION_ERROR", message = "dataset_ids không hợp lệ." } });
-            }
-
-            // A dataset-scoped API key may only request its own single dataset.
-            var scoped = principal.GetScopedDatasetId();
-            if (scoped is not null && (ids.Length != 1 || ids[0] != scoped.Value))
-            {
-                return Results.Forbid();
             }
 
             var tableFilter = string.IsNullOrWhiteSpace(tables)
@@ -53,4 +61,7 @@ public static class ContextEndpoints
         }
         return ids.Length == 0 ? null : ids;
     }
+
+    private static bool SchemaTokenLikeMatch(string? provided, string expected)
+        => SchemaTokenService.Matches(provided, expected);
 }

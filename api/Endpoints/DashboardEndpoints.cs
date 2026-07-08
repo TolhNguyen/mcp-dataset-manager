@@ -82,12 +82,6 @@ public static class DashboardEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && req.DatasetId is not null && scopedDatasetId != req.DatasetId)
-            {
-                return Results.Forbid();
-            }
-
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
 
             var result = await dashboardService.CreateWidgetAsync(userId.Value, id, req, source, actor, ct);
@@ -102,25 +96,6 @@ public static class DashboardEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null)
-            {
-                // UpdateWidgetRequest carries no dataset_id (a widget never changes dataset on
-                // update), so a scoped key's match must be checked against the widget's existing
-                // dataset_id rather than the request body.
-                var existing = await dashboardService.GetDashboardAsync(userId.Value, id, ct);
-                if (!existing.Success)
-                {
-                    return MapWriteResult(existing);
-                }
-
-                var widgetDatasetId = FindWidgetDatasetId(existing.Data, wid);
-                if (widgetDatasetId is null || widgetDatasetId != scopedDatasetId)
-                {
-                    return Results.Forbid();
-                }
-            }
-
             var result = await dashboardService.UpdateWidgetAsync(userId.Value, id, wid, req, ct);
             return MapWriteResult(result);
         })
@@ -132,22 +107,6 @@ public static class DashboardEndpoints
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null)
-            {
-                var existing = await dashboardService.GetDashboardAsync(userId.Value, id, ct);
-                if (!existing.Success)
-                {
-                    return MapWriteResult(existing);
-                }
-
-                var widgetDatasetId = FindWidgetDatasetId(existing.Data, wid);
-                if (widgetDatasetId is null || widgetDatasetId != scopedDatasetId)
-                {
-                    return Results.Forbid();
-                }
-            }
 
             var result = await dashboardService.ArchiveWidgetAsync(userId.Value, id, wid, ct);
             return MapWriteResult(result);
@@ -190,12 +149,6 @@ public static class DashboardEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && req.DatasetId is not null && scopedDatasetId != req.DatasetId)
-            {
-                return Results.Forbid();
-            }
-
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
 
             var ensured = await dashboardService.EnsureDashboardByNameAsync(userId.Value, req.DashboardName, source, actor, ct);
@@ -231,14 +184,6 @@ public static class DashboardEndpoints
     /// </summary>
     private static (string Source, string Actor) ResolveSourceAndActor(ClaimsPrincipal principal, Guid userId)
     {
-        var authMethod = principal.FindFirstValue(ClaimsPrincipalExtensions.AuthMethodClaim);
-
-        if (authMethod == "dataset_api_key")
-        {
-            var keyName = principal.GetKeyName() ?? "key";
-            return ("ai", $"ai:{keyName}");
-        }
-
         var email = principal.FindFirstValue(ClaimTypes.Email);
         var actor = !string.IsNullOrWhiteSpace(email) ? email : $"user:{userId}";
         return ("user", actor);
@@ -269,28 +214,6 @@ public static class DashboardEndpoints
     /// dataset_id of its own. Returns null if the widget isn't found among the dashboard's
     /// (active) widgets — the caller treats that as "not this key's dataset" and forbids.
     /// </summary>
-    private static Guid? FindWidgetDatasetId(object? data, Guid widgetId)
-    {
-        if (data is null) return null;
-        try
-        {
-            dynamic dto = data;
-            foreach (dynamic widget in dto.widgets)
-            {
-                if ((Guid)widget.widget_id == widgetId)
-                {
-                    return (Guid)widget.dataset_id;
-                }
-            }
-        }
-        catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
-        {
-            return null;
-        }
-
-        return null;
-    }
-
     private static IResult MapWriteResult(ApiResult<object> result)
     {
         if (result.Success)

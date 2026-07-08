@@ -24,6 +24,7 @@ public static class ErrorCodes
     // Knowledge
     public const string KnowledgeNotFound = "KNOWLEDGE_NOT_FOUND";
     public const string KnowledgeLimitReached = "KNOWLEDGE_LIMIT_REACHED";
+    public const string KnowledgeWriteDisabled = "KNOWLEDGE_WRITE_DISABLED";
 
     // Dashboard
     public const string DashboardNotFound = "DASHBOARD_NOT_FOUND";
@@ -47,12 +48,20 @@ public static class ErrorCodes
     public const string TableNotFound = "TABLE_NOT_FOUND";
     public const string QueryTimeout = "QUERY_TIMEOUT";
     public const string QueryFailed = "QUERY_FAILED";
+    public const string ContextRequired = "CONTEXT_REQUIRED";
+    public const string SchemaChanged = "SCHEMA_CHANGED";
     public const string TokenBudgetConfirmationRequired = "TOKEN_BUDGET_CONFIRMATION_REQUIRED";
     public const string TokenBudgetHardLimitExceeded = "TOKEN_BUDGET_HARD_LIMIT_EXCEEDED";
     public const string InvalidConfirmation = "INVALID_CONFIRMATION";
 
     public const string InvalidRequest = "INVALID_REQUEST";
     public const string Internal = "INTERNAL_ERROR";
+}
+
+public static class AssistantInstructions
+{
+    public const string NeverFabricate =
+        "Report this error to the user verbatim. Never estimate, interpolate, or fabricate data values. If you cannot obtain real data, tell the user what failed and stop.";
 }
 
 public sealed class ApiError

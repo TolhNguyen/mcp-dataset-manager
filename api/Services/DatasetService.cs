@@ -30,7 +30,8 @@ public class DatasetService(
                processed_at AS ProcessedAt,
                source_kind AS SourceKind,
                connection_id AS ConnectionId,
-               alias AS Alias
+               alias AS Alias,
+               ai_can_write_knowledge AS AiCanWriteKnowledge
         FROM datasets
         """;
 
@@ -294,6 +295,15 @@ public class DatasetService(
         return ApiResult<object>.Ok(new { deleted = true, dataset_id = datasetId });
     }
 
+    public async Task<bool> SetAiCanWriteKnowledgeAsync(Guid userId, Guid datasetId, bool value, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var affected = await conn.ExecuteAsync(
+            "UPDATE datasets SET ai_can_write_knowledge = @Value WHERE id = @Id AND user_id = @UserId",
+            new { Value = value, Id = datasetId, UserId = userId });
+        return affected > 0;
+    }
+
     public async Task<DownloadFile?> GetOriginalDownloadAsync(Guid userId, Guid datasetId, CancellationToken ct)
     {
         var dataset = await GetDatasetRecordAsync(userId, datasetId, ct);
@@ -393,6 +403,7 @@ public class DatasetService(
         error_message = d.ErrorMessage,
         created_at = d.CreatedAt,
         processed_at = d.ProcessedAt,
+        ai_can_write_knowledge = d.AiCanWriteKnowledge,
         actions = BuildActions(d.Id)
     };
 

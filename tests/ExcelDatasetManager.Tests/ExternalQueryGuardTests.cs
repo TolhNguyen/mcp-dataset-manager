@@ -157,6 +157,57 @@ public class ExternalQueryGuardTests
         Assert.Equal("SELECT 1", result.Sql);
     }
 
+    [Fact]
+    public void Rejects_with_cte_without_final_select()
+    {
+        var sql = "WITH x AS (SELECT 1 AS a)";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_INCOMPLETE", r.Code);
+    }
+
+    [Fact]
+    public void Allows_with_cte_with_final_select()
+    {
+        var sql = "WITH x AS (SELECT 1 AS a) SELECT * FROM x";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.True(r.Success);
+    }
+
+    [Fact]
+    public void Rejects_at_parameter()
+    {
+        var sql = "SELECT * FROM t WHERE d = @run_date";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_PARAMETERS_NOT_SUPPORTED", r.Code);
+    }
+
+    [Fact]
+    public void Allows_at_inside_string_literal()
+    {
+        var sql = "SELECT * FROM t WHERE email = 'a@b.com'";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.True(r.Success);
+    }
+
+    [Fact]
+    public void Rejects_mssql_bracket_spanning_dot()
+    {
+        var sql = "SELECT * FROM [dbo.sync_fb_campaigns_report_days]";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.MsSql);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_INVALID_IDENTIFIER_QUOTING", r.Code);
+    }
+
+    [Fact]
+    public void Allows_mssql_proper_brackets()
+    {
+        var sql = "SELECT * FROM [dbo].[sync_fb_campaigns]";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.MsSql);
+        Assert.True(r.Success);
+    }
+
     // ---------- ApplyRowCap: postgresql / mysql / bigquery ----------
 
     [Theory]
