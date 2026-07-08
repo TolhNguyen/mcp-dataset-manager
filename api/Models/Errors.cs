@@ -58,6 +58,12 @@ public static class ErrorCodes
     public const string Internal = "INTERNAL_ERROR";
 }
 
+public static class AssistantInstructions
+{
+    public const string NeverFabricate =
+        "Report this error to the user verbatim. Never estimate, interpolate, or fabricate data values. If you cannot obtain real data, tell the user what failed and stop.";
+}
+
 public sealed class ApiError
 {
     public string Code { get; init; } = "";

@@ -276,6 +276,7 @@ public class ExternalQueryService(
             {
                 code,
                 message,
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = false
             }
         };
@@ -298,6 +299,7 @@ public class ExternalQueryService(
             {
                 code = ErrorCodes.TooManyConcurrentQueries,
                 message = "Too many concurrent queries are running against this connection. Please retry shortly.",
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = true
             }
         };
@@ -331,6 +333,7 @@ public class ExternalQueryService(
             {
                 code,
                 message,
+                assistant_instruction = AssistantInstructions.NeverFabricate,
                 retryable = true
             },
             suggestions = BuildSuggestions()
