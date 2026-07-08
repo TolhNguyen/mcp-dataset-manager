@@ -238,6 +238,8 @@ builder.Services.AddScoped<KnowledgeService>();
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton(sp =>
+    new QueryGuideService(Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, "storage")));
 builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<SecretProtector>();
@@ -353,6 +355,7 @@ app.MapOAuthEndpoints();
 app.MapConnectionEndpoints();
 app.MapKnowledgeEndpoints();
 app.MapContextEndpoints();
+app.MapQueryGuideEndpoints();
 app.MapDashboardEndpoints();
 
 app.Run();
