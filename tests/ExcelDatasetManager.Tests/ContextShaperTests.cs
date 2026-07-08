@@ -34,7 +34,9 @@ public class ContextShaperTests
             new ContextKnowledgeInput("metric_definition", "Doanh thu", "Sau chiết khấu", "ai", true),
             new ContextKnowledgeInput("note", "Ghi chú", "Nội dung", "user", false)
         ],
-        ActiveKnowledgeCount: knowledgeCount);
+        ActiveKnowledgeCount: knowledgeCount,
+        SchemaToken: "st_test000000",
+        DialectNotes: ["note"]);
 
     private static JsonElement ToJson(object payload) =>
         JsonSerializer.SerializeToElement(payload);
@@ -111,5 +113,21 @@ public class ContextShaperTests
         var te = ToJson(res.Payload).GetProperty("token_estimate").GetInt32();
         Assert.True(te > 0);
         Assert.Equal(res.TokenEstimate, te);
+    }
+
+    [Fact]
+    public void Payload_includes_schema_token_and_dialect_notes()
+    {
+        var ds = Sample() with
+        {
+            SchemaToken = "st_abc123def456",
+            DialectNotes = ["r1"]
+        };
+
+        var result = ContextShaper.Shape([ds], null, "full", 100000, Estimate);
+        var json = JsonSerializer.Serialize(result.Payload);
+
+        Assert.Contains("st_abc123def456", json);
+        Assert.Contains("dialect_notes", json);
     }
 }
