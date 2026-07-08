@@ -164,12 +164,12 @@ const Dashboard = {
 };
 
 function getMcpUrl() {
-    const userId = Api.user?.id || 'missing-user-id';
+    // Danh tính lấy từ token OAuth/PAT, KHÔNG nằm trong URL — bridge chỉ phục vụ đúng /mcp.
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return `http://${window.location.hostname}:5848/mcp/${userId}`;
+        return `http://${window.location.hostname}:5848/mcp`;
     }
 
-    return `${window.location.origin}/mcp/${userId}`;
+    return `${window.location.origin}/mcp`;
 }
 
 function getClaudeWebConnectorUrl() {
