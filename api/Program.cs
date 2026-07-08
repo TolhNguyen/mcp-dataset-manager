@@ -155,13 +155,10 @@ builder.Services.AddAuthorization(options =>
     });
 
     // "KnowledgeWrite" — accepts JWT and API key (PAT or dataset-scoped), but dataset-scoped
-    // keys only pass if their can_write claim is "true". JWT sessions and PATs are implicitly
-    // full-write. See ClaimsPrincipalExtensions.CanWriteKnowledge.
     options.AddPolicy("KnowledgeWrite", policy =>
     {
         policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationOptions.SchemeName);
         policy.RequireAuthenticatedUser();
-        policy.RequireAssertion(ctx => ctx.User.CanWriteKnowledge());
     });
 });
 
@@ -225,7 +222,6 @@ builder.Services.AddSingleton<NpgsqlDataSource>(_ => NpgsqlDataSource.Create(con
 builder.Services.AddScoped<MigrationRunner>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<DatasetService>();
-builder.Services.AddScoped<DatasetApiKeyService>();
 builder.Services.AddScoped<UserApiKeyService>();
 builder.Services.AddScoped<OAuthService>();
 builder.Services.AddScoped<DuckDbQueryService>();

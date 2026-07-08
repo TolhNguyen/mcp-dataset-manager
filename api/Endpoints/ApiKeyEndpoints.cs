@@ -9,41 +9,9 @@ public static class ApiKeyEndpoints
 {
     public static void MapApiKeyEndpoints(this WebApplication app)
     {
-        var datasets = app.MapGroup("/api/datasets").RequireAuthorization();
-
-        datasets.MapPost("/{datasetId:guid}/api-keys",
-            async (Guid datasetId, CreateDatasetApiKeyRequest req, ClaimsPrincipal principal, DatasetApiKeyService svc, CancellationToken ct) =>
-        {
-            var userId = principal.GetUserId()!.Value;
-            var result = await svc.CreateAsync(userId, datasetId, req.Name, req.CanWrite ?? false, ct);
-            return result.Success
-                ? Results.Ok(new { success = true, data = result.Data })
-                : Results.BadRequest(new { success = false, error = result.Error });
-        }).RequireAuthorization("JwtOnly");
-
-        datasets.MapGet("/{datasetId:guid}/api-keys",
-            async (Guid datasetId, ClaimsPrincipal principal, DatasetApiKeyService svc, CancellationToken ct) =>
-        {
-            var userId = principal.GetUserId()!.Value;
-            var result = await svc.ListAsync(userId, datasetId, ct);
-            return result.Success
-                ? Results.Ok(new { success = true, data = result.Data })
-                : Results.NotFound(new { success = false, error = result.Error });
-        }).RequireAuthorization("JwtOnly");
-
-        datasets.MapDelete("/{datasetId:guid}/api-keys/{keyId:guid}",
-            async (Guid datasetId, Guid keyId, ClaimsPrincipal principal, DatasetApiKeyService svc, CancellationToken ct) =>
-        {
-            var userId = principal.GetUserId()!.Value;
-            var result = await svc.RevokeAsync(userId, datasetId, keyId, ct);
-            return result.Success
-                ? Results.Ok(new { success = true, data = result.Data })
-                : Results.NotFound(new { success = false, error = result.Error });
-        }).RequireAuthorization("JwtOnly");
-
         var userKeys = app.MapGroup("/api/user/api-keys").RequireAuthorization("JwtOnly");
 
-        userKeys.MapPost("/", async (CreateDatasetApiKeyRequest req, ClaimsPrincipal principal, UserApiKeyService svc, CancellationToken ct) =>
+        userKeys.MapPost("/", async (CreateUserApiKeyRequest req, ClaimsPrincipal principal, UserApiKeyService svc, CancellationToken ct) =>
         {
             var userId = principal.GetUserId()!.Value;
             var result = await svc.CreateAsync(userId, req.Name, ct);

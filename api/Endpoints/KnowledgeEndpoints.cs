@@ -25,12 +25,6 @@ public static class KnowledgeEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
-
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
             if (dataset is null)
             {
@@ -49,16 +43,15 @@ public static class KnowledgeEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
-
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
             if (dataset is null)
             {
                 return Results.NotFound(new { success = false, error = new { code = ErrorCodes.DatasetNotFound, message = "Dataset not found." } });
+            }
+
+            if (principal.IsApiKeyPrincipal() && !dataset.AiCanWriteKnowledge)
+            {
+                return KnowledgeWriteDisabled();
             }
 
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
@@ -76,16 +69,15 @@ public static class KnowledgeEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
-
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
             if (dataset is null)
             {
                 return Results.NotFound(new { success = false, error = new { code = ErrorCodes.DatasetNotFound, message = "Dataset not found." } });
+            }
+
+            if (principal.IsApiKeyPrincipal() && !dataset.AiCanWriteKnowledge)
+            {
+                return KnowledgeWriteDisabled();
             }
 
             if (!ctx.Request.HasFormContentType)
@@ -140,16 +132,15 @@ public static class KnowledgeEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
-
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
             if (dataset is null)
             {
                 return Results.NotFound(new { success = false, error = new { code = ErrorCodes.DatasetNotFound, message = "Dataset not found." } });
+            }
+
+            if (principal.IsApiKeyPrincipal() && !dataset.AiCanWriteKnowledge)
+            {
+                return KnowledgeWriteDisabled();
             }
 
             var (_, actor) = ResolveSourceAndActor(principal, userId.Value);
@@ -165,12 +156,6 @@ public static class KnowledgeEndpoints
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
 
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
             if (dataset is null)
@@ -191,14 +176,6 @@ public static class KnowledgeEndpoints
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-
-            // JwtOnly policy already excludes dataset-scoped keys, but keep the scoped-key check
-            // for consistency/defense-in-depth with the other routes in this file.
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
 
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
             if (dataset is null)
@@ -223,18 +200,11 @@ public static class KnowledgeEndpoints
                 .ToArray();
 
             var datasetIds = new List<Guid>(ids.Length);
-            var scopedDatasetId = principal.GetScopedDatasetId();
-
             foreach (var idText in ids)
             {
                 if (!Guid.TryParse(idText, out var datasetId))
                 {
                     return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = $"Invalid dataset id: {idText}" } });
-                }
-
-                if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-                {
-                    return Results.Forbid();
                 }
 
                 var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
@@ -269,18 +239,22 @@ public static class KnowledgeEndpoints
     /// </summary>
     private static (string Source, string Actor) ResolveSourceAndActor(ClaimsPrincipal principal, Guid userId)
     {
-        var authMethod = principal.FindFirstValue(ClaimsPrincipalExtensions.AuthMethodClaim);
-
-        if (authMethod == "dataset_api_key")
-        {
-            var keyName = principal.GetKeyName() ?? "key";
-            return ("ai", $"ai:{keyName}");
-        }
-
         var email = principal.FindFirstValue(ClaimTypes.Email);
         var actor = !string.IsNullOrWhiteSpace(email) ? email : $"user:{userId}";
         return ("user", actor);
     }
+
+    private static IResult KnowledgeWriteDisabled() =>
+        Results.Json(new
+        {
+            success = false,
+            error = new
+            {
+                code = ErrorCodes.KnowledgeWriteDisabled,
+                message = "The dataset owner disabled AI knowledge writes for this dataset.",
+                assistant_instruction = "Report this to the user verbatim. Do not retry."
+            }
+        }, statusCode: 403);
 
     private static IResult MapWriteResult(ApiResult<object> result)
     {

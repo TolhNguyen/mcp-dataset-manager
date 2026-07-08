@@ -21,13 +21,6 @@ public static class ContextEndpoints
                 return Results.BadRequest(new { success = false, error = new { code = "VALIDATION_ERROR", message = "dataset_ids không hợp lệ." } });
             }
 
-            // A dataset-scoped API key may only request its own single dataset.
-            var scoped = principal.GetScopedDatasetId();
-            if (scoped is not null && (ids.Length != 1 || ids[0] != scoped.Value))
-            {
-                return Results.Forbid();
-            }
-
             var tableFilter = string.IsNullOrWhiteSpace(tables)
                 ? null
                 : tables.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

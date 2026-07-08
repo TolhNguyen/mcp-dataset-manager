@@ -22,7 +22,7 @@ const DatasetDetail = {
             const result = await Api.get(`/api/datasets/${this.datasetId}`);
             this.renderDataset(result.dataset);
             this.renderTables(result.tables);
-            await ApiKeys.refresh(this.datasetId);
+            DatasetSettings.refresh(this.datasetId, result.dataset);
             await Knowledge.refresh(this.datasetId);
 
             if (result.dataset.status === 'processing') {
@@ -76,7 +76,7 @@ const DatasetDetail = {
         // Show subsequent cards only when the dataset is ready.
         const isReady = d.status === 'ready';
         $('#tablesCard').hidden = !isReady;
-        $('#apiKeysCard').hidden = !isReady;
+        $('#datasetSettingsCard').hidden = !isReady;
         $('#queryCard').hidden = !isReady;
     },
 
@@ -238,6 +238,50 @@ const DatasetDetail = {
             alert(err.message || 'Không tải được file.');
         } finally {
             button.disabled = false;
+        }
+    }
+};
+
+const DatasetSettings = {
+    datasetId: null,
+    saving: false,
+
+    refresh(datasetId, dataset) {
+        this.datasetId = datasetId;
+
+        if (!this._bound) {
+            $('#aiKnowledgeWriteToggle').addEventListener('change', (e) => this.save(e.target.checked));
+            this._bound = true;
+        }
+
+        $('#aiKnowledgeWriteToggle').checked = dataset.ai_can_write_knowledge !== false;
+        $('#datasetSettingsStatus').hidden = true;
+    },
+
+    async save(value) {
+        if (this.saving) return;
+
+        const toggle = $('#aiKnowledgeWriteToggle');
+        const status = $('#datasetSettingsStatus');
+
+        this.saving = true;
+        toggle.disabled = true;
+        status.hidden = false;
+        status.className = 'status-msg';
+        status.textContent = 'Đang lưu…';
+
+        try {
+            await Api.patch(`/api/datasets/${this.datasetId}/settings`, {
+                ai_can_write_knowledge: value
+            });
+            status.textContent = 'Đã lưu.';
+        } catch (err) {
+            toggle.checked = !value;
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Lưu thất bại.';
+        } finally {
+            toggle.disabled = false;
+            this.saving = false;
         }
     }
 };

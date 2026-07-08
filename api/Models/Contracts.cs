@@ -24,7 +24,8 @@ public record QueryOptions(
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
 public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options);
 
-public record CreateDatasetApiKeyRequest(string Name, bool? CanWrite = null);
+public record CreateUserApiKeyRequest(string Name);
+public record UpdateDatasetSettingsRequest(bool? AiCanWriteKnowledge);
 public record OAuthRegisterRequest(string[]? RedirectUris, string? ClientName);
 public record OAuthApproveRequest(
     string? ClientId, string? RedirectUri, string? CodeChallenge, string? CodeChallengeMethod, string? State);

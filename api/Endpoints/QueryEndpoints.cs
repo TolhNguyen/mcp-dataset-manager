@@ -17,12 +17,6 @@ public static class QueryEndpoints
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
 
-            var scopedDatasetId = principal.GetScopedDatasetId();
-            if (scopedDatasetId is not null && scopedDatasetId != datasetId)
-            {
-                return Results.Forbid();
-            }
-
             var dataset = await datasetService.GetDatasetRecordAsync(userId.Value, datasetId, ct);
 
             var result = dataset is not null && string.Equals(dataset.SourceKind, "external_db", StringComparison.OrdinalIgnoreCase)
@@ -34,18 +28,11 @@ public static class QueryEndpoints
         .RequireAuthorization("QueryAccess")
         .RequireRateLimiting("query");
 
-        // Multi-dataset JOIN across FILE datasets (each addressed by its alias). Not available
-        // to dataset-scoped API keys (which are bound to a single dataset).
         app.MapPost("/api/query",
             async (MultiQueryRequest req, ClaimsPrincipal principal, DuckDbQueryService duckDbSvc, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
-
-            if (principal.GetScopedDatasetId() is not null)
-            {
-                return Results.Forbid(); // dataset-scoped keys can't run cross-dataset queries
-            }
 
             var ids = req.DatasetIds ?? Array.Empty<Guid>();
             var query = new QueryRequest("sql", req.Sql, req.Options);

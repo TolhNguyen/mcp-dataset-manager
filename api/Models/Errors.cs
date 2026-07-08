@@ -24,6 +24,7 @@ public static class ErrorCodes
     // Knowledge
     public const string KnowledgeNotFound = "KNOWLEDGE_NOT_FOUND";
     public const string KnowledgeLimitReached = "KNOWLEDGE_LIMIT_REACHED";
+    public const string KnowledgeWriteDisabled = "KNOWLEDGE_WRITE_DISABLED";
 
     // Dashboard
     public const string DashboardNotFound = "DASHBOARD_NOT_FOUND";
