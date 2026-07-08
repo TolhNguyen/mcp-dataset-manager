@@ -20,9 +20,10 @@ public record QueryOptions(
     bool? AllowLargeResult,
     string? ConfirmationId,
     string? ResponseMode,
-    [property: System.Text.Json.Serialization.JsonIgnore] bool? BypassAiBudget = null);
+    [property: System.Text.Json.Serialization.JsonIgnore] bool? BypassAiBudget = null,
+    string? SchemaToken = null);
 public record QueryRequest(string QueryType, string Sql, QueryOptions? Options);
-public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options);
+public record MultiQueryRequest(Guid[]? DatasetIds, string Sql, QueryOptions? Options, Dictionary<string, string>? SchemaTokens = null);
 
 public record CreateUserApiKeyRequest(string Name);
 public record UpdateDatasetSettingsRequest(bool? AiCanWriteKnowledge);
