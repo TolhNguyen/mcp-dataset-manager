@@ -54,7 +54,8 @@ public record DatasetRecord(
     DateTime? ProcessedAt,
     string SourceKind,
     Guid? ConnectionId,
-    string? Alias
+    string? Alias,
+    bool AiCanWriteKnowledge
 );
 
 public record DatasetTableRecord(

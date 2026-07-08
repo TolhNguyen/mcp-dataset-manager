@@ -30,7 +30,8 @@ public class DatasetService(
                processed_at AS ProcessedAt,
                source_kind AS SourceKind,
                connection_id AS ConnectionId,
-               alias AS Alias
+               alias AS Alias,
+               ai_can_write_knowledge AS AiCanWriteKnowledge
         FROM datasets
         """;
 
