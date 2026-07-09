@@ -166,6 +166,8 @@
 <!-- Self-hosted Chart.js v4 (vendored, no CDN — CSP-safe). Guarded via `if (window.Chart)` in
      dashboards.js so a missing/blocked file degrades to a text fallback instead of throwing. -->
 <script src="/js/chart.umd.min.js?v=20260710-share"></script>
+<!-- Chart render pipeline shared with share.js — must load before dashboards.js. -->
+<script src="/js/chart-render.js?v=20260710-share"></script>
 <script src="/js/dashboards.js?v=20260710-share"></script>
 <script>
     DashboardsPage.init();

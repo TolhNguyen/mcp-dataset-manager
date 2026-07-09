@@ -2,8 +2,9 @@
 // No auth.js / api.js on this page: plain fetch() with same-origin cookies (the session cookie
 // is HttpOnly and scoped to Path=/api/share — set by the server, never read/written here).
 //
-// Mirrors js/dashboards.js's widget-rendering pattern (renderStat/renderTable/renderChartJs)
-// against the read-only share endpoints. Response shapes actually served (verified by reading
+// Widget rendering (renderStat/renderTable/renderChartJs) is shared with js/dashboards.js via
+// js/chart-render.js (window.EdmChartRender), applied here against the read-only share endpoints.
+// Response shapes actually served (verified by reading
 // ShareEndpoints.cs / DashboardService.GetShareViewAsync / GetWidgetDataAsync):
 //   POST /api/share/{token}/session        -> 204 + Set-Cookie | 401 {success:false,error:{code:"SHARE_PIN_INVALID",...}}
 //                                              | 429 {success:false,error:{code:"SHARE_LOCKED",message:"...minutes..."}}
@@ -16,12 +17,9 @@
 
 const token = location.pathname.split('/').pop();
 
-// Same validated default palette as js/dashboards.js (dataviz skill, light-mode steps) — fixed
-// order, never cycled/re-picked per filter.
-const CHART_SERIES_COLORS = [
-    '#2a78d6', '#1baf7a', '#eda100', '#008300',
-    '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'
-];
+// Chart rendering pipeline (renderStat/renderTable/renderChartJs/destroyChart + the
+// CHART_SERIES_COLORS palette) is shared with js/dashboards.js and lives in js/chart-render.js,
+// loaded before this file — see window.EdmChartRender.
 
 const SharePage = {
     charts: {}, // widget_id -> Chart.js instance, destroyed before re-creating
@@ -155,8 +153,8 @@ const SharePage = {
     },
 
     // ============================================================
-    // Widget data + rendering (pattern copied from js/dashboards.js, endpoint swapped to the
-    // anonymous /api/share/{token}/widgets/{id}/data route)
+    // Widget data + rendering (rendering delegated to EdmChartRender from js/chart-render.js,
+    // endpoint swapped to the anonymous /api/share/{token}/widgets/{id}/data route)
     // ============================================================
 
     async loadWidgetData(widget) {
@@ -177,7 +175,7 @@ const SharePage = {
     },
 
     renderWidgetError(widget, message) {
-        this.destroyChart(widget.widget_id);
+        EdmChartRender.destroyChart(this.charts, widget.widget_id);
         const body = $(`#widget-body-${widget.widget_id}`);
         if (!body) return;
         body.innerHTML = `<div class="error">${escapeHtml(message)}</div>`;
@@ -192,116 +190,24 @@ const SharePage = {
 
         switch (widget.chart_type) {
             case 'stat':
-                this.destroyChart(widget.widget_id);
-                this.renderStat(body, columns, rows);
+                EdmChartRender.destroyChart(this.charts, widget.widget_id);
+                EdmChartRender.renderStat(body, columns, rows);
                 break;
             case 'line':
             case 'bar':
             case 'pie':
-                this.renderChartJs(widget, body, columns, rows);
+                EdmChartRender.renderChartJs(this.charts, widget, body, columns, rows);
                 break;
             case 'table':
             default:
-                this.destroyChart(widget.widget_id);
-                this.renderTable(body, columns, rows);
+                EdmChartRender.destroyChart(this.charts, widget.widget_id);
+                EdmChartRender.renderTable(body, columns, rows);
                 break;
-        }
-    },
-
-    renderStat(body, columns, rows) {
-        const label = columns[0] ? escapeHtml(columns[0].name) : '';
-        const value = (rows[0] && rows[0][0] !== null && rows[0][0] !== undefined)
-            ? escapeHtml(String(rows[0][0]))
-            : '—';
-        body.innerHTML = `
-            <div class="stat-value">${value}</div>
-            <div class="stat-label">${label}</div>`;
-    },
-
-    renderTable(body, columns, rows) {
-        if (rows.length === 0) {
-            body.innerHTML = '<p class="muted">Không có dữ liệu.</p>';
-            return;
-        }
-
-        const head = columns.map(c => `<th>${escapeHtml(c.name)}</th>`).join('');
-        const bodyRows = rows.map(r => `<tr>${r.map(cell =>
-            `<td>${cell === null || cell === undefined ? '' : escapeHtml(String(cell))}</td>`).join('')}</tr>`).join('');
-
-        body.innerHTML = `
-            <div class="table-scroll">
-                <table class="data-table">
-                    <thead><tr>${head}</tr></thead>
-                    <tbody>${bodyRows}</tbody>
-                </table>
-            </div>`;
-    },
-
-    renderChartJs(widget, body, columns, rows) {
-        this.destroyChart(widget.widget_id);
-
-        if (!window.Chart) {
-            body.innerHTML = '<p class="muted">Chart.js chưa được tải — không thể vẽ biểu đồ này.</p>';
-            return;
-        }
-
-        if (rows.length === 0 || columns.length < 2) {
-            body.innerHTML = '<p class="muted">Không đủ dữ liệu để vẽ biểu đồ (cần ít nhất 2 cột).</p>';
-            return;
-        }
-
-        body.innerHTML = '<div class="chart-canvas-wrap"><canvas></canvas></div>';
-        const canvas = body.querySelector('canvas');
-
-        const labels = rows.map(r => String(r[0] ?? ''));
-        const seriesColumns = widget.chart_type === 'pie' ? columns.slice(1, 2) : columns.slice(1);
-
-        const datasets = seriesColumns.map((col, idx) => {
-            const color = CHART_SERIES_COLORS[idx % CHART_SERIES_COLORS.length];
-            const colIndex = idx + 1;
-            const data = rows.map(r => {
-                const v = Number(r[colIndex]);
-                return Number.isFinite(v) ? v : 0;
-            });
-
-            if (widget.chart_type === 'pie') {
-                return {
-                    label: col.name,
-                    data,
-                    backgroundColor: CHART_SERIES_COLORS
-                };
-            }
-
-            return {
-                label: col.name,
-                data,
-                borderColor: color,
-                backgroundColor: widget.chart_type === 'bar' ? color : 'transparent',
-                borderWidth: 2
-            };
-        });
-
-        this.charts[widget.widget_id] = new Chart(canvas, {
-            type: widget.chart_type,
-            data: { labels, datasets },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: { legend: { display: datasets.length > 1 || widget.chart_type === 'pie' } }
-            }
-        });
-    },
-
-    destroyChart(widgetId) {
-        const existing = this.charts[widgetId];
-        if (existing) {
-            existing.destroy();
-            delete this.charts[widgetId];
         }
     },
 
     clearAllCharts() {
-        Object.keys(this.charts).forEach(id => this.destroyChart(id));
+        Object.keys(this.charts).forEach(id => EdmChartRender.destroyChart(this.charts, id));
     }
 };
 
