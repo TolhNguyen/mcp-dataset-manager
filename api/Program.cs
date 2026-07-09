@@ -380,6 +380,7 @@ app.MapKnowledgeEndpoints();
 app.MapContextEndpoints();
 app.MapQueryGuideEndpoints();
 app.MapShareEndpoints();
+app.MapShareAdminEndpoints();
 app.MapDashboardEndpoints();
 
 app.Run();
