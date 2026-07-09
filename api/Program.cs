@@ -154,7 +154,8 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAuthenticatedUser();
     });
 
-    // "KnowledgeWrite" — accepts JWT and API key (PAT or dataset-scoped), but dataset-scoped
+    // "KnowledgeWrite" — accepts JWT and PAT. The per-dataset ai_can_write_knowledge toggle is
+    // enforced in the endpoints (it needs the dataset row), not here.
     options.AddPolicy("KnowledgeWrite", policy =>
     {
         policy.AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme, ApiKeyAuthenticationOptions.SchemeName);

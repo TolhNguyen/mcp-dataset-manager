@@ -163,6 +163,13 @@ public static class KnowledgeEndpoints
                 return Results.NotFound(new { success = false, error = new { code = ErrorCodes.DatasetNotFound, message = "Dataset not found." } });
             }
 
+            // Archiving is a knowledge write too — the per-dataset AI toggle applies the same as
+            // on create/upload/update.
+            if (principal.IsApiKeyPrincipal() && !dataset.AiCanWriteKnowledge)
+            {
+                return KnowledgeWriteDisabled();
+            }
+
             var (_, actor) = ResolveSourceAndActor(principal, userId.Value);
 
             var result = await knowledgeService.ArchiveAsync(datasetId, entryId, actor, ct);

@@ -30,6 +30,13 @@ public static class SchemaTokenGate
         return SchemaTokenService.Compute(tables);
     }
 
+    /// <summary>
+    /// Widget updates only pass the gate check when the caller is a PAT AND the request actually
+    /// writes new SQL — title/position/chart-only updates are exempt.
+    /// </summary>
+    public static bool ShouldGateWidgetUpdate(bool isApiKeyPrincipal, string? sql)
+        => isApiKeyPrincipal && !string.IsNullOrWhiteSpace(sql);
+
     public static object? BuildGateError(string? provided, string expected, Guid datasetId)
     {
         if (SchemaTokenService.Matches(provided, expected)) return null;

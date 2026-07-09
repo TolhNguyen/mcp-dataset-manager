@@ -2,6 +2,7 @@ using System.Security.Claims;
 using ExcelDatasetManager.Api.Auth;
 using ExcelDatasetManager.Api.Models;
 using ExcelDatasetManager.Api.Services;
+using Npgsql;
 
 namespace ExcelDatasetManager.Api.Endpoints;
 
@@ -77,10 +78,15 @@ public static class DashboardEndpoints
 
         app.MapPost("/api/dashboards/{id:guid}/widgets", async (
             Guid id, CreateWidgetRequest req,
-            ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
+            ClaimsPrincipal principal, DashboardService dashboardService, DatasetService datasetService,
+            NpgsqlDataSource dataSource, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
+
+            var gateError = await WidgetCreateGateAsync(
+                principal, userId.Value, req.DatasetId, req.SchemaToken, datasetService, dataSource, ct);
+            if (gateError is not null) return gateError;
 
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
 
@@ -91,10 +97,25 @@ public static class DashboardEndpoints
 
         app.MapPut("/api/dashboards/{id:guid}/widgets/{wid:guid}", async (
             Guid id, Guid wid, UpdateWidgetRequest req,
-            ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
+            ClaimsPrincipal principal, DashboardService dashboardService,
+            NpgsqlDataSource dataSource, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
+
+            // Gate only PAT updates that write new SQL; the dataset comes from the existing
+            // widget (UpdateWidgetRequest carries no dataset_id). A null dataset id means the
+            // widget isn't the caller's — fall through to UpdateWidgetAsync's WIDGET_NOT_FOUND.
+            if (SchemaTokenGate.ShouldGateWidgetUpdate(principal.IsApiKeyPrincipal(), req.Sql))
+            {
+                var widgetDatasetId = await dashboardService.GetWidgetDatasetIdAsync(userId.Value, id, wid, ct);
+                if (widgetDatasetId is Guid gateDatasetId)
+                {
+                    var expected = await SchemaTokenGate.ComputeCurrentAsync(dataSource, gateDatasetId, ct);
+                    var gateError = SchemaTokenGate.BuildGateError(req.SchemaToken, expected, gateDatasetId);
+                    if (gateError is not null) return Results.Json(gateError, statusCode: 400);
+                }
+            }
 
             var result = await dashboardService.UpdateWidgetAsync(userId.Value, id, wid, req, ct);
             return MapWriteResult(result);
@@ -144,10 +165,17 @@ public static class DashboardEndpoints
         // exist yet, so an agent can address a dashboard by name without a prior lookup call.
         app.MapPost("/api/dashboards/widgets", async (
             CreateWidgetByDashboardNameRequest req,
-            ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
+            ClaimsPrincipal principal, DashboardService dashboardService, DatasetService datasetService,
+            NpgsqlDataSource dataSource, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
+
+            // Gate BEFORE EnsureDashboardByNameAsync so a rejected request doesn't leave an
+            // auto-created empty dashboard behind as a side effect.
+            var gateError = await WidgetCreateGateAsync(
+                principal, userId.Value, req.DatasetId, req.SchemaToken, datasetService, dataSource, ct);
+            if (gateError is not null) return gateError;
 
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
 
@@ -187,6 +215,25 @@ public static class DashboardEndpoints
         var email = principal.FindFirstValue(ClaimTypes.Email);
         var actor = !string.IsNullOrWhiteSpace(email) ? email : $"user:{userId}";
         return ("user", actor);
+    }
+
+    /// <summary>
+    /// Schema-token gate for widget creation (AI writes SQL here too, so the same proof-of-read
+    /// applies as on the query endpoints). Ownership is checked BEFORE computing the token so an
+    /// unowned/unknown dataset id falls through to the service's DATASET_NOT_FOUND instead of the
+    /// gate leaking whether the id exists. Returns null when the request may proceed.
+    /// </summary>
+    private static async Task<IResult?> WidgetCreateGateAsync(
+        ClaimsPrincipal principal, Guid userId, Guid? datasetId, string? schemaToken,
+        DatasetService datasetService, NpgsqlDataSource dataSource, CancellationToken ct)
+    {
+        if (!principal.IsApiKeyPrincipal() || datasetId is not Guid gateDatasetId) return null;
+
+        if (await datasetService.GetDatasetRecordAsync(userId, gateDatasetId, ct) is null) return null;
+
+        var expected = await SchemaTokenGate.ComputeCurrentAsync(dataSource, gateDatasetId, ct);
+        var gateError = SchemaTokenGate.BuildGateError(schemaToken, expected, gateDatasetId);
+        return gateError is null ? null : Results.Json(gateError, statusCode: 400);
     }
 
     /// <summary>

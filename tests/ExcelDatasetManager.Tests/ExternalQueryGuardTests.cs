@@ -174,6 +174,28 @@ public class ExternalQueryGuardTests
         Assert.True(r.Success);
     }
 
+    // Regression: câu WITH hợp lệ có ngoặc trong SELECT cuối từng bị chặn oan SQL_INCOMPLETE
+    // vì check cũ đòi "select" đứng sau dấu ')' top-level cuối cùng.
+    [Theory]
+    [InlineData("WITH t AS (SELECT 1 AS a) SELECT COUNT(*) FROM t")]
+    [InlineData("WITH t AS (SELECT 1 AS a) SELECT * FROM t WHERE a IN (1, 2)")]
+    [InlineData("WITH t AS (SELECT 1 AS a) SELECT SUM(a) AS total FROM t")]
+    [InlineData("WITH a AS (SELECT 1 AS i), b AS (SELECT 2 AS i) SELECT * FROM a JOIN b ON (a.i = b.i)")]
+    public void Allows_with_cte_whose_final_select_contains_parens(string sql)
+    {
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.True(r.Success, $"{r.Code}: {r.Message}");
+    }
+
+    [Fact]
+    public void Rejects_multiple_ctes_without_final_select()
+    {
+        var sql = "WITH x AS (SELECT 1 AS a), y AS (SELECT 2 AS b)";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_INCOMPLETE", r.Code);
+    }
+
     [Fact]
     public void Rejects_at_parameter()
     {
@@ -206,6 +228,25 @@ public class ExternalQueryGuardTests
         var sql = "SELECT * FROM [dbo].[sync_fb_campaigns]";
         var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.MsSql);
         Assert.True(r.Success);
+    }
+
+    // Rule chỉ nhắm dạng [ident.ident] (schema+table gộp 1 bracket); alias hiển thị
+    // có dấu chấm kèm khoảng trắng là identifier hợp lệ, không được chặn oan.
+    [Theory]
+    [InlineData("SELECT COUNT(*) AS [No. of Orders] FROM dbo.orders")]
+    [InlineData("SELECT revenue AS [Rev. Total (M VND)] FROM dbo.sales")]
+    public void Allows_mssql_bracketed_alias_containing_dot_and_spaces(string sql)
+    {
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.MsSql);
+        Assert.True(r.Success, $"{r.Code}: {r.Message}");
+    }
+
+    [Fact]
+    public void Rejects_mssql_bracket_spanning_dot_with_underscores_and_digits()
+    {
+        var r = ExternalQueryGuard.Validate("SELECT * FROM [dbo.tbl_2024]", ExternalDbProviders.MsSql);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_INVALID_IDENTIFIER_QUOTING", r.Code);
     }
 
     // ---------- ApplyRowCap: postgresql / mysql / bigquery ----------

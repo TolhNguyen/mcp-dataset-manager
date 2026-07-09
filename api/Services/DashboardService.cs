@@ -509,6 +509,22 @@ public class DashboardService(
     // Internal helpers
     // ============================================================
 
+    /// <summary>
+    /// Resolves the dataset a widget reads from, scoped by dashboard ownership. Used by the
+    /// endpoint-level schema-token gate on widget SQL updates (UpdateWidgetRequest carries no
+    /// dataset_id of its own). Returns null when the widget/dashboard isn't the caller's.
+    /// </summary>
+    public async Task<Guid?> GetWidgetDatasetIdAsync(Guid userId, Guid dashboardId, Guid widgetId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<Guid?>("""
+            SELECT w.dataset_id
+            FROM dashboard_widgets w
+            JOIN dashboards d ON d.id = w.dashboard_id
+            WHERE d.user_id = @UserId AND w.dashboard_id = @DashboardId AND w.id = @WidgetId
+            """, new { UserId = userId, DashboardId = dashboardId, WidgetId = widgetId });
+    }
+
     private static Task<DashboardWidget?> GetOwnedWidgetAsync(
         NpgsqlConnection conn, Guid userId, Guid dashboardId, Guid widgetId) =>
         conn.QuerySingleOrDefaultAsync<DashboardWidget>(
