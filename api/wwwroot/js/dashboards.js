@@ -48,6 +48,11 @@ const DashboardsPage = {
         $('#cancelWidgetBtn').addEventListener('click', () => this.closeWidgetModal());
         $('#closeWidgetModalBtn').addEventListener('click', () => this.closeWidgetModal());
 
+        $('#shareBtn').addEventListener('click', () => this.openSharePanel());
+        $('#closeSharePanelBtn').addEventListener('click', () => this.closeSharePanel());
+        $('#shareForm').addEventListener('submit', (e) => this.handleCreateShare(e));
+        $('#exportHtmlBtn').addEventListener('click', () => this.handleExportHtml());
+
         // Auto-refresh timers must not survive navigation away from this page.
         window.addEventListener('beforeunload', () => this.clearAllTimers());
 
@@ -500,6 +505,180 @@ const DashboardsPage = {
             await this.selectDashboard(this.currentDashboardId);
         } catch (err) {
             alert(err.message);
+        }
+    },
+
+    // ============================================================
+    // Share management (anonymous PIN-gated viewer at /share/{token})
+    // ============================================================
+    //
+    // Wire-verified against api/Endpoints/ShareAdminEndpoints.cs and ExportEndpoints.cs:
+    //   POST   /api/dashboards/{id}/shares -> { success, data: { share_id, share_url, pin,
+    //                                            expires_at, note } }  (pin shown ONCE, never
+    //                                            retrievable again — server never returns it from
+    //                                            GET /shares)
+    //   GET    /api/dashboards/{id}/shares -> { success, data: { shares: [ { share_id,
+    //                                            created_by, created_at, expires_at, view_count,
+    //                                            last_viewed_at, revoked }, ... ] } }
+    //   DELETE /api/shares/{shareId}       -> { success, data: { revoked: true, share_id } }
+    //   POST   /api/dashboards/{id}/export -> { success, data: { download_url, expires_in_sec,
+    //                                            one_time, encrypted } }
+
+    async openSharePanel() {
+        $('#shareForm').reset();
+        $('#shareFormStatus').hidden = true;
+        $('#shareResult').hidden = true;
+        $('#exportStatus').hidden = true;
+        $('#sharePanel').hidden = false;
+        await this.loadShares();
+    },
+
+    closeSharePanel() {
+        $('#sharePanel').hidden = true;
+    },
+
+    async loadShares() {
+        const wrap = $('#shareList');
+        wrap.innerHTML = '<p class="muted">Đang tải…</p>';
+        try {
+            const res = await Api.get(`/api/dashboards/${this.currentDashboardId}/shares`);
+            const shares = (res.data && res.data.shares) || [];
+            this.renderShareList(shares);
+        } catch (err) {
+            wrap.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    renderShareList(shares) {
+        const wrap = $('#shareList');
+        if (shares.length === 0) {
+            wrap.innerHTML = '<p class="muted">Chưa có link chia sẻ nào đang hoạt động.</p>';
+            return;
+        }
+
+        wrap.innerHTML = shares.map(s => `
+            <div class="dataset-item" data-id="${escapeHtml(s.share_id)}">
+                <div class="dataset-head">
+                    <div>
+                        <div class="dataset-name">${escapeHtml(s.created_by)}</div>
+                        <div class="dataset-meta">
+                            Hạn: ${formatDate(s.expires_at)}
+                            · Lượt xem: ${s.view_count}
+                            ${s.last_viewed_at ? '· Xem lần cuối: ' + formatDate(s.last_viewed_at) : ''}
+                        </div>
+                    </div>
+                    <div class="dataset-actions">
+                        <button class="btn-danger" data-action="revoke" data-id="${escapeHtml(s.share_id)}">Thu hồi</button>
+                    </div>
+                </div>
+            </div>`).join('');
+
+        wrap.querySelectorAll('[data-action="revoke"]').forEach(btn => {
+            btn.addEventListener('click', () => this.handleRevokeShare(btn.dataset.id));
+        });
+    },
+
+    async handleRevokeShare(shareId) {
+        if (!confirm('Thu hồi link chia sẻ này? Người xem sẽ không thể truy cập nữa.')) return;
+        try {
+            await Api.delete(`/api/shares/${shareId}`);
+            await this.loadShares();
+        } catch (err) {
+            alert(err.message);
+        }
+    },
+
+    async handleCreateShare(e) {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        const status = $('#shareFormStatus');
+        status.hidden = true;
+
+        const pin = fd.get('pin');
+        const days = parseInt(fd.get('expires_in_days'), 10) || 30;
+        const btn = $('#createShareBtn');
+        btn.disabled = true;
+
+        try {
+            const res = await Api.post(`/api/dashboards/${this.currentDashboardId}/shares`, {
+                pin: pin ? pin : null,
+                expires_in_days: days
+            });
+            this.showShareResult(res.data);
+            e.currentTarget.reset();
+            await this.loadShares();
+        } catch (err) {
+            status.hidden = false;
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Không tạo được link chia sẻ.';
+        } finally {
+            btn.disabled = false;
+        }
+    },
+
+    showShareResult(data) {
+        const box = $('#shareResult');
+        box.hidden = false;
+        box.innerHTML = `
+            <p style="font-weight:600;color:var(--danger);margin:0 0 8px">
+                ⚠ Link và PIN chỉ hiển thị MỘT LẦN — hãy lưu lại ngay, hệ thống sẽ không hiện lại.
+            </p>
+            <label>
+                <span>Link chia sẻ</span>
+                <input type="text" readonly value="${escapeHtml(data.share_url)}" />
+            </label>
+            <button type="button" class="btn-link" data-copy="url">Copy link</button>
+            <label style="margin-top:8px">
+                <span>PIN</span>
+                <input type="text" readonly value="${escapeHtml(data.pin)}" />
+            </label>
+            <button type="button" class="btn-link" data-copy="pin">Copy PIN</button>
+            <p class="muted" style="margin-top:8px">Hết hạn: ${escapeHtml(formatDate(data.expires_at))}</p>`;
+
+        box.querySelector('[data-copy="url"]').addEventListener('click', () => this.copyShareText(data.share_url, 'Đã copy link.'));
+        box.querySelector('[data-copy="pin"]').addEventListener('click', () => this.copyShareText(data.pin, 'Đã copy PIN.'));
+    },
+
+    async copyShareText(text, message) {
+        const status = $('#shareFormStatus');
+        try {
+            await navigator.clipboard.writeText(text);
+            status.hidden = false;
+            status.className = 'status-msg success';
+            status.textContent = message;
+        } catch {
+            status.hidden = false;
+            status.className = 'status-msg error';
+            status.textContent = 'Không copy được. Hãy chọn nội dung và copy thủ công.';
+        }
+    },
+
+    async handleExportHtml() {
+        const status = $('#exportStatus');
+        status.hidden = true;
+
+        let pin = prompt('Đặt PIN để bảo vệ file xuất (tuỳ chọn — để trống nếu không cần):');
+        if (pin === null) return; // user cancelled the prompt
+        pin = pin.trim();
+
+        const btn = $('#exportHtmlBtn');
+        btn.disabled = true;
+        btn.textContent = 'Đang xuất…';
+
+        try {
+            const res = await Api.post(`/api/dashboards/${this.currentDashboardId}/export`, { pin: pin || null });
+            const data = res.data;
+            window.open(data.download_url, '_blank', 'noopener');
+            status.hidden = false;
+            status.className = 'status-msg success';
+            status.textContent = `Đã tạo file xuất. Link tải dùng được một lần, hết hạn sau ${Math.round(data.expires_in_sec / 60)} phút.`;
+        } catch (err) {
+            status.hidden = false;
+            status.className = 'status-msg error';
+            status.textContent = err.message || 'Không xuất được file.';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Xuất file HTML';
         }
     }
 };
