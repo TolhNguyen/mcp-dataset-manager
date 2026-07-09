@@ -252,6 +252,7 @@ builder.Services.AddScoped<KnowledgeService>();
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<DashboardShareService>();
+builder.Services.AddScoped<DashboardExportService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(sp =>
     new QueryGuideService(Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, "storage")));
@@ -382,6 +383,7 @@ app.MapQueryGuideEndpoints();
 app.MapShareEndpoints();
 app.MapShareAdminEndpoints();
 app.MapDashboardEndpoints();
+app.MapExportEndpoints();
 
 app.Run();
 
