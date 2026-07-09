@@ -14,6 +14,7 @@ using ExcelDatasetManager.Api.Services.Connectors;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -242,6 +243,13 @@ builder.Services.AddScoped<DashboardShareService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(sp =>
     new QueryGuideService(Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, "storage")));
+// Data Protection backs the share viewer-session cookie. Persist keys under storage/ so
+// sessions survive container restarts; without this the keys land on an ephemeral tempdir.
+var dpKeysDir = Path.Combine(builder.Environment.ContentRootPath, "storage", "dataprotection-keys");
+Directory.CreateDirectory(dpKeysDir);
+builder.Services.AddDataProtection()
+    .SetApplicationName("edm")
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysDir));
 builder.Services.AddSingleton<ShareSessionProtector>();
 builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
