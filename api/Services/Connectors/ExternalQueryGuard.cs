@@ -125,8 +125,9 @@ public static class ExternalQueryGuard
 
     private static bool HasTopLevelSelectAfterCtes(string scrubbed)
     {
+        // Every CTE body lives inside parentheses, so a SELECT keyword at paren-depth 0
+        // can only be the statement's main SELECT.
         var depth = 0;
-        var lastTopLevelCloseParen = -1;
         for (var i = 0; i < scrubbed.Length; i++)
         {
             var ch = scrubbed[i];
@@ -137,14 +138,22 @@ public static class ExternalQueryGuard
             else if (ch == ')')
             {
                 depth--;
-                if (depth == 0) lastTopLevelCloseParen = i;
+            }
+            else if (depth == 0
+                     && (ch is 's' or 'S')
+                     && i + 6 <= scrubbed.Length
+                     && string.Compare(scrubbed, i, "select", 0, 6, StringComparison.OrdinalIgnoreCase) == 0
+                     && (i == 0 || !IsWordChar(scrubbed[i - 1]))
+                     && (i + 6 == scrubbed.Length || !IsWordChar(scrubbed[i + 6])))
+            {
+                return true;
             }
         }
 
-        if (lastTopLevelCloseParen < 0) return false;
-        var tail = scrubbed[(lastTopLevelCloseParen + 1)..];
-        return Regex.IsMatch(tail, @"\bselect\b", RegexOptions.IgnoreCase);
+        return false;
     }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     public static string ApplyRowCap(string sql, string provider, int maxRows)
     {

@@ -174,6 +174,28 @@ public class ExternalQueryGuardTests
         Assert.True(r.Success);
     }
 
+    // Regression: câu WITH hợp lệ có ngoặc trong SELECT cuối từng bị chặn oan SQL_INCOMPLETE
+    // vì check cũ đòi "select" đứng sau dấu ')' top-level cuối cùng.
+    [Theory]
+    [InlineData("WITH t AS (SELECT 1 AS a) SELECT COUNT(*) FROM t")]
+    [InlineData("WITH t AS (SELECT 1 AS a) SELECT * FROM t WHERE a IN (1, 2)")]
+    [InlineData("WITH t AS (SELECT 1 AS a) SELECT SUM(a) AS total FROM t")]
+    [InlineData("WITH a AS (SELECT 1 AS i), b AS (SELECT 2 AS i) SELECT * FROM a JOIN b ON (a.i = b.i)")]
+    public void Allows_with_cte_whose_final_select_contains_parens(string sql)
+    {
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.True(r.Success, $"{r.Code}: {r.Message}");
+    }
+
+    [Fact]
+    public void Rejects_multiple_ctes_without_final_select()
+    {
+        var sql = "WITH x AS (SELECT 1 AS a), y AS (SELECT 2 AS b)";
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.BigQuery);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_INCOMPLETE", r.Code);
+    }
+
     [Fact]
     public void Rejects_at_parameter()
     {
