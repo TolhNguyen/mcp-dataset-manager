@@ -29,8 +29,13 @@ public static class ShareAdminEndpoints
                 : $"user:{principal.FindFirstValue(ClaimTypes.Email) ?? userId.Value.ToString()}";
 
             var result = await shares.CreateAsync(userId.Value, id, req.Pin, req.ExpiresInDays, createdBy, ct);
-            return result.Success
-                ? Results.Ok(new { success = true, data = result.Data })
+            if (result.Success)
+            {
+                return Results.Ok(new { success = true, data = result.Data });
+            }
+
+            return result.Error?.Code == ErrorCodes.DashboardNotFound
+                ? Results.NotFound(new { success = false, error = result.Error })
                 : Results.BadRequest(new { success = false, error = result.Error });
         })
         .RequireAuthorization("KnowledgeWrite");
