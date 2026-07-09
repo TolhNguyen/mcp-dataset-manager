@@ -9,7 +9,7 @@ namespace ExcelDatasetManager.Api.Services;
 /// browser can decrypt it directly with WebCrypto (which expects the tag appended).</summary>
 public static class ExportCrypto
 {
-    private const int Iterations = 150_000;
+    public const int Iterations = 150_000;
 
     public static (string SaltB64, string IvB64, string CipherB64) Encrypt(string pin, string plaintextJson)
     {
@@ -75,7 +75,7 @@ public class DashboardExportService(DashboardService dashboards, IWebHostEnviron
             var (salt, iv, cipher) = ExportCrypto.Encrypt(pin, payloadJson);
             body = $$"""
                 <script>
-                window.__EDM_ENC__ = { salt: "{{salt}}", iv: "{{iv}}", cipher: "{{cipher}}", iterations: 150000 };
+                window.__EDM_ENC__ = { salt: "{{salt}}", iv: "{{iv}}", cipher: "{{cipher}}", iterations: {{ExportCrypto.Iterations}} };
                 </script>
                 """;
         }

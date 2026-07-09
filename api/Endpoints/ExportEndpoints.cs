@@ -12,6 +12,11 @@ public static class ExportEndpoints
 {
     public record ExportRequest(string? Pin);
 
+    // IMemoryCache is single-instance per process (no distributed cache here), so a plain
+    // in-process lock is sufficient to make the take-and-remove pair atomic and prevent two
+    // concurrent requests from both retrieving the same one-time download.
+    private static readonly object DownloadLock = new();
+
     public static void MapExportEndpoints(this WebApplication app)
     {
         app.MapPost("/api/dashboards/{id:guid}/export", async (
@@ -51,11 +56,17 @@ public static class ExportEndpoints
         .RequireAuthorization("KnowledgeWrite")
         .RequireRateLimiting("query");
 
-        app.MapGet("/api/exports/{token}", (string token, IMemoryCache cache) =>
+        app.MapGet("/api/exports/{token}", (string token, HttpContext ctx, IMemoryCache cache) =>
         {
             var key = $"export:{token}";
-            if (!cache.TryGetValue(key, out string? html) || html is null) return Results.NotFound();
-            cache.Remove(key); // one-time
+            string? html;
+            lock (DownloadLock)
+            {
+                if (!cache.TryGetValue(key, out html) || html is null) return Results.NotFound();
+                cache.Remove(key); // one-time
+            }
+
+            ctx.Response.Headers["Cache-Control"] = "no-store";
             return Results.File(System.Text.Encoding.UTF8.GetBytes(html), "text/html; charset=utf-8", "dashboard-snapshot.html");
         });
     }
