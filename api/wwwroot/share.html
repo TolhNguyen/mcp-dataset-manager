@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Dashboard được chia sẻ — Excel Dataset Manager</title>
+    <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+<header class="topbar">
+    <h1>Excel Dataset Manager</h1>
+</header>
+
+<main class="container">
+    <section class="card" id="pin-gate">
+        <header class="card-head">
+            <h2>Nhập PIN để xem</h2>
+        </header>
+        <p class="muted">Dashboard này được bảo vệ bằng mã PIN. Nhập PIN mà người chia sẻ đã cung cấp cho bạn.</p>
+
+        <form id="pinForm" novalidate>
+            <label>
+                <span>Mã PIN</span>
+                <input type="password" id="pin" name="pin" autocomplete="off" required autofocus />
+            </label>
+            <button type="submit" id="pinSubmitBtn">Mở</button>
+        </form>
+
+        <div id="pinStatus" class="status-msg error" hidden></div>
+    </section>
+
+    <section class="card" id="dash" hidden>
+        <header class="card-head">
+            <h1 style="margin:0;font-size:20px"></h1>
+        </header>
+        <div id="widgetGrid" class="widget-grid"></div>
+    </section>
+</main>
+
+<!-- Self-hosted Chart.js v4 (vendored, no CDN). This page's server response sets
+     Content-Security-Policy: script-src 'self' (see ShareEndpoints.ApplyShareHeaders), so no
+     inline <script> is used anywhere on this page — share.js self-invokes at the bottom of the
+     file instead. Guarded via `if (window.Chart)` in share.js so a missing/blocked file degrades
+     to a text fallback instead of throwing. -->
+<script src="/js/chart.umd.min.js?v=20260710-share"></script>
+<!-- Chart render pipeline shared with dashboards.js — must load before share.js. -->
+<script src="/js/chart-render.js?v=20260710-share"></script>
+<script src="/js/share.js?v=20260710-share"></script>
+</body>
+</html>

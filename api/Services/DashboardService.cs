@@ -525,6 +525,47 @@ public class DashboardService(
             """, new { UserId = userId, DashboardId = dashboardId, WidgetId = widgetId });
     }
 
+    // Dapper projection row for GetShareViewAsync — deliberately excludes Sql (unlike
+    // SelectWidgetSql/SelectOwnedWidgetSql above) since this is the anonymous-viewer payload.
+    private sealed record ShareWidgetRow(Guid WidgetId, string Title, string ChartType, string? ChartConfigJson, int Position);
+
+    /// <summary>
+    /// Dashboard payload for anonymous share viewers: widget metadata WITHOUT the SQL —
+    /// viewers must not learn schema/business logic from queries.
+    /// </summary>
+    public async Task<ApiResult<object>> GetShareViewAsync(Guid userId, Guid dashboardId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        var name = await conn.ExecuteScalarAsync<string?>(
+            "SELECT name FROM dashboards WHERE id = @Id AND user_id = @UserId",
+            new { Id = dashboardId, UserId = userId });
+        if (name is null)
+        {
+            return ApiResult<object>.Fail(ErrorCodes.DashboardNotFound, "Dashboard not found.");
+        }
+
+        var widgets = (await conn.QueryAsync<ShareWidgetRow>("""
+            SELECT w.id AS WidgetId, w.title AS Title, w.chart_type AS ChartType,
+                   w.chart_config::text AS ChartConfigJson, w.position AS Position
+            FROM dashboard_widgets w
+            WHERE w.dashboard_id = @DashboardId AND w.archived_at IS NULL
+            ORDER BY w.position
+            """, new { DashboardId = dashboardId })).ToList();
+
+        return ApiResult<object>.Ok(new
+        {
+            dashboard_name = name,
+            widgets = widgets.Select(w => new
+            {
+                widget_id = w.WidgetId,
+                title = w.Title,
+                chart_type = w.ChartType,
+                chart_config = ParseChartConfig(w.ChartConfigJson),
+                position = w.Position
+            })
+        });
+    }
+
     private static Task<DashboardWidget?> GetOwnedWidgetAsync(
         NpgsqlConnection conn, Guid userId, Guid dashboardId, Guid widgetId) =>
         conn.QuerySingleOrDefaultAsync<DashboardWidget>(

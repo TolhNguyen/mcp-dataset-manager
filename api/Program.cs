@@ -14,6 +14,7 @@ using ExcelDatasetManager.Api.Services.Connectors;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -199,6 +200,18 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
+
+    // Anonymous PIN attempts on share links: strict per-IP window on top of the per-share
+    // lockout stored in the DB.
+    options.AddPolicy("share-pin", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 // ============================================================
@@ -238,9 +251,19 @@ builder.Services.AddScoped<ExternalQueryService>();
 builder.Services.AddScoped<KnowledgeService>();
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<DashboardService>();
+builder.Services.AddScoped<DashboardShareService>();
+builder.Services.AddScoped<DashboardExportService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(sp =>
     new QueryGuideService(Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, "storage")));
+// Data Protection backs the share viewer-session cookie. Persist keys under storage/ so
+// sessions survive container restarts; without this the keys land on an ephemeral tempdir.
+var dpKeysDir = Path.Combine(builder.Environment.ContentRootPath, "storage", "dataprotection-keys");
+Directory.CreateDirectory(dpKeysDir);
+builder.Services.AddDataProtection()
+    .SetApplicationName("edm")
+    .PersistKeysToFileSystem(new DirectoryInfo(dpKeysDir));
+builder.Services.AddSingleton<ShareSessionProtector>();
 builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<SecretProtector>();
@@ -357,7 +380,10 @@ app.MapConnectionEndpoints();
 app.MapKnowledgeEndpoints();
 app.MapContextEndpoints();
 app.MapQueryGuideEndpoints();
+app.MapShareEndpoints();
+app.MapShareAdminEndpoints();
 app.MapDashboardEndpoints();
+app.MapExportEndpoints();
 
 app.Run();
 

@@ -629,3 +629,104 @@ response_hint: |
   error.code=VALIDATION_ERROR means the new sql/title/chart_type didn't pass
   validation.
 ```
+
+## share_dashboard
+
+```yaml
+type: tool
+name: share_dashboard
+description: |
+  Create a share link + PIN so someone WITHOUT an EDM account (e.g. the user's
+  boss) can view this dashboard live in a browser. The link and PIN are
+  returned ONCE and cannot be retrieved again. Present both to the user and
+  advise sending the link and the PIN over two separate channels.
+connection: edm
+method: POST
+path: /api/dashboards/{dashboard_id}/shares
+params:
+  dashboard_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_dashboards.
+  pin:
+    in: body
+    type: string
+    description: Optional custom PIN (4-32 chars). Omit to auto-generate a 6-digit PIN.
+  expires_in_days:
+    in: body
+    type: integer
+    description: Link lifetime in days, default 30, max 90.
+response_hint: |
+  Shape: {success, data: {share_id, share_url, pin, expires_at, note}}.
+  Keep share_id if the user may want to revoke this link later.
+  error.code=SHARE_LIMIT_REACHED means 10 active links exist - revoke one first.
+```
+
+## list_dashboard_shares
+
+```yaml
+type: tool
+name: list_dashboard_shares
+description: List active share links of a dashboard (metadata only - tokens/PINs are never retrievable).
+connection: edm
+method: GET
+path: /api/dashboards/{dashboard_id}/shares
+params:
+  dashboard_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_dashboards.
+response_hint: |
+  Shape: {success, data: {shares: [{share_id, created_by, created_at, expires_at, view_count, last_viewed_at}]}}.
+```
+
+## revoke_dashboard_share
+
+```yaml
+type: tool
+name: revoke_dashboard_share
+description: |
+  Immediately revoke one share link (e.g. when the user says a link leaked or
+  someone should lose access). Viewers with that link lose access at once.
+connection: edm
+method: DELETE
+path: /api/shares/{share_id}
+params:
+  share_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from share_dashboard or list_dashboard_shares.
+response_hint: |
+  Shape: {success, data: {revoked, share_id}}. error.code=SHARE_NOT_FOUND if already revoked/unknown.
+```
+
+## export_dashboard
+
+```yaml
+type: tool
+name: export_dashboard
+description: |
+  Export a dashboard as a self-contained snapshot HTML file (data frozen at
+  export time) for sending by email/chat. Optionally protect the file with a
+  PIN - the embedded data is then AES-GCM encrypted and unreadable without it.
+connection: edm
+method: POST
+path: /api/dashboards/{dashboard_id}/export
+params:
+  dashboard_id:
+    in: path
+    type: string
+    required: true
+    description: UUID from list_dashboards.
+  pin:
+    in: body
+    type: string
+    description: Optional PIN (4-32 chars) to encrypt the embedded data. Without it the file is readable by anyone who has it.
+response_hint: |
+  Shape: {success, data: {download_url, expires_in_sec, one_time, encrypted}}.
+  Give download_url to the user immediately - it is single-use and expires in
+  10 minutes. Remind them of the PIN separately if one was set.
+```
