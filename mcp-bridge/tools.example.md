@@ -555,13 +555,19 @@ params:
     in: body
     type: integer
     description: How often the dashboard re-runs this widget's SQL, in seconds. Clamped to a 30s minimum server-side; omit to default to 60.
+  schema_token:
+    in: body
+    type: string
+    required: true
+    description: The schema_token from get_context for this dataset. Required; the server rejects widget SQL without it.
 response_hint: |
   Shape: {success, data: {widget_id, dashboard_id, dataset_id, title, sql,
   chart_type, chart_config, refresh_interval_sec, position, ...}}. Keep
   widget_id + dashboard_id in case the user wants to change this widget later
   via update_dashboard_widget.
-  Widget SQL uses dashboard endpoints, not the query gate; validate SQL with
-  query_dataset first when creating analytical widgets.
+  Validate SQL with query_dataset first when creating analytical widgets.
+  error.code=CONTEXT_REQUIRED / SCHEMA_CHANGED means call get_context for this
+  dataset and retry with its schema_token.
   error.code=VALIDATION_ERROR means the SQL wasn't accepted as a read-only
   SELECT/WITH against the dataset, or a required field was missing/invalid.
   error.code=DATASET_NOT_FOUND means dataset_id doesn't belong to this user.
@@ -659,10 +665,15 @@ params:
     in: body
     type: integer
     description: New refresh interval in seconds (clamped to a 30s minimum). Omit to keep the current one.
+  schema_token:
+    in: body
+    type: string
+    description: The schema_token from get_context for the widget's dataset. Required whenever you send new sql; omit for title/chart/position-only updates.
 response_hint: |
   Shape: {success, data: {widget_id, dashboard_id, ..., updated_at}}.
-  Widget SQL uses dashboard endpoints, not the query gate; validate SQL with
-  query_dataset first when changing analytical widget SQL.
+  Validate SQL with query_dataset first when changing analytical widget SQL.
+  error.code=CONTEXT_REQUIRED / SCHEMA_CHANGED means call get_context for the
+  widget's dataset and retry with its schema_token.
   error.code=WIDGET_NOT_FOUND or DASHBOARD_NOT_FOUND means the ids don't match
   an existing widget owned by this user.
   error.code=VALIDATION_ERROR means the new sql/title/chart_type didn't pass

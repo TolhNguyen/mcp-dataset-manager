@@ -90,6 +90,8 @@ public class QueryGuideService
            tables, normalized column names, sample rows, `dialect`, `dialect_notes`, and a
            `schema_token`. Read the schema - never guess table or column names.
         3. Call `query_dataset` / `query_datasets` with your SQL AND the `schema_token` from get_context.
+           The same schema_token is also required by `create_dashboard_widget`, and by
+           `update_dashboard_widget` whenever you send new SQL.
 
         ## When to do what
         - Read schema (get_context): before your first query on a dataset, and again whenever a query
