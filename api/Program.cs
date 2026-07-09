@@ -200,6 +200,18 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0
             }));
+
+    // Anonymous PIN attempts on share links: strict per-IP window on top of the per-share
+    // lockout stored in the DB.
+    options.AddPolicy("share-pin", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
 });
 
 // ============================================================
@@ -367,6 +379,7 @@ app.MapConnectionEndpoints();
 app.MapKnowledgeEndpoints();
 app.MapContextEndpoints();
 app.MapQueryGuideEndpoints();
+app.MapShareEndpoints();
 app.MapDashboardEndpoints();
 
 app.Run();
