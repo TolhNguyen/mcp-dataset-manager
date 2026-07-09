@@ -230,6 +230,25 @@ public class ExternalQueryGuardTests
         Assert.True(r.Success);
     }
 
+    // Rule chỉ nhắm dạng [ident.ident] (schema+table gộp 1 bracket); alias hiển thị
+    // có dấu chấm kèm khoảng trắng là identifier hợp lệ, không được chặn oan.
+    [Theory]
+    [InlineData("SELECT COUNT(*) AS [No. of Orders] FROM dbo.orders")]
+    [InlineData("SELECT revenue AS [Rev. Total (M VND)] FROM dbo.sales")]
+    public void Allows_mssql_bracketed_alias_containing_dot_and_spaces(string sql)
+    {
+        var r = ExternalQueryGuard.Validate(sql, ExternalDbProviders.MsSql);
+        Assert.True(r.Success, $"{r.Code}: {r.Message}");
+    }
+
+    [Fact]
+    public void Rejects_mssql_bracket_spanning_dot_with_underscores_and_digits()
+    {
+        var r = ExternalQueryGuard.Validate("SELECT * FROM [dbo.tbl_2024]", ExternalDbProviders.MsSql);
+        Assert.False(r.Success);
+        Assert.Equal("SQL_INVALID_IDENTIFIER_QUOTING", r.Code);
+    }
+
     // ---------- ApplyRowCap: postgresql / mysql / bigquery ----------
 
     [Theory]

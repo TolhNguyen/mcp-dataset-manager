@@ -98,8 +98,10 @@ public static class ExternalQueryGuard
             return QueryValidationResult.Fail("NON_READONLY_SQL", "Dangerous PostgreSQL function is not allowed.");
         }
 
+        // Only the [ident.ident] shape (schema+table fused into one bracket) is a mistake;
+        // a display alias like [No. of Orders] is a legal identifier and must pass.
         if (provider == ExternalDbProviders.MsSql
-            && Regex.IsMatch(scrubbed, @"\[[^\]\[]*\.[^\]\[]*\]"))
+            && Regex.IsMatch(scrubbed, @"\[[A-Za-z_][A-Za-z0-9_$]*\.[A-Za-z_][A-Za-z0-9_$]*\]"))
         {
             return QueryValidationResult.Fail("SQL_INVALID_IDENTIFIER_QUOTING",
                 "Use [dbo].[table] or dbo.table - [dbo.table] is a single identifier and will not resolve.");

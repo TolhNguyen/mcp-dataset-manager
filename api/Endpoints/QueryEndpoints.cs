@@ -38,7 +38,7 @@ public static class QueryEndpoints
 
         app.MapPost("/api/query",
             async (MultiQueryRequest req, ClaimsPrincipal principal, DuckDbQueryService duckDbSvc,
-                NpgsqlDataSource dataSource, CancellationToken ct) =>
+                DatasetService datasetService, NpgsqlDataSource dataSource, CancellationToken ct) =>
         {
             var userId = principal.GetUserId();
             if (userId is null) return Results.Unauthorized();
@@ -48,6 +48,11 @@ public static class QueryEndpoints
             {
                 foreach (var id in ids)
                 {
+                    // Ownership first: an unowned/unknown id must fall through to
+                    // QueryMultiAsync's own not-found handling instead of the gate leaking
+                    // whether the dataset id exists.
+                    if (await datasetService.GetDatasetRecordAsync(userId.Value, id, ct) is null) continue;
+
                     var expected = await SchemaTokenGate.ComputeCurrentAsync(dataSource, id, ct);
                     var provided = req.SchemaTokens is not null && req.SchemaTokens.TryGetValue(id.ToString(), out var t) ? t : null;
                     var gateError = SchemaTokenGate.BuildGateError(provided, expected, id);
