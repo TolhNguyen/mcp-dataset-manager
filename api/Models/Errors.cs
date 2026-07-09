@@ -31,6 +31,8 @@ public static class ErrorCodes
     public const string WidgetNotFound = "WIDGET_NOT_FOUND";
     public const string DashboardLimitReached = "DASHBOARD_LIMIT_REACHED";
     public const string WidgetLimitReached = "WIDGET_LIMIT_REACHED";
+    public const string ShareLimitReached = "SHARE_LIMIT_REACHED";
+    public const string ShareNotFound = "SHARE_NOT_FOUND";
 
     // External DB connections / live-query datasets
     public const string ConnectionNotFound = "CONNECTION_NOT_FOUND";

@@ -238,6 +238,7 @@ builder.Services.AddScoped<ExternalQueryService>();
 builder.Services.AddScoped<KnowledgeService>();
 builder.Services.AddScoped<ContextService>();
 builder.Services.AddScoped<DashboardService>();
+builder.Services.AddScoped<DashboardShareService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(sp =>
     new QueryGuideService(Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, "storage")));
