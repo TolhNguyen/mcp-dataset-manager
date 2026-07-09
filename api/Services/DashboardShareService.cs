@@ -19,27 +19,39 @@ public class DashboardShareService(NpgsqlDataSource dataSource, IConfiguration c
         Guid userId, Guid dashboardId, string? pin, int? expiresInDays, string createdBy, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        // Domain seed 3 (seed 0 is KnowledgeService's per-dataset lock, seed 2 is
+        // DashboardService's per-dashboard widget-create lock) — keyed by dashboard id so
+        // concurrent share creates on the SAME dashboard serialize and the active-share COUNT
+        // check below can't race with another create's INSERT past the 10-share cap.
+        await conn.ExecuteAsync(
+            "SELECT pg_advisory_xact_lock(hashtextextended(@DashboardKey::text, 3))",
+            new { DashboardKey = dashboardId }, tx);
 
         var owns = await conn.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM dashboards WHERE id = @Id AND user_id = @UserId",
-            new { Id = dashboardId, UserId = userId });
+            new { Id = dashboardId, UserId = userId }, tx);
         if (owns == 0)
         {
+            await tx.RollbackAsync(ct);
             return ApiResult<object>.Fail(ErrorCodes.DashboardNotFound, "Dashboard not found.");
         }
 
         var active = await conn.ExecuteScalarAsync<int>("""
             SELECT COUNT(*) FROM dashboard_shares
             WHERE dashboard_id = @Id AND revoked_at IS NULL AND expires_at > NOW()
-            """, new { Id = dashboardId });
+            """, new { Id = dashboardId }, tx);
         if (active >= ShareCrypto.MaxActiveSharesPerDashboard)
         {
+            await tx.RollbackAsync(ct);
             return ApiResult<object>.Fail(ErrorCodes.ShareLimitReached,
                 $"This dashboard already has {ShareCrypto.MaxActiveSharesPerDashboard} active share links. Revoke one first.");
         }
 
         if (pin is not null && (pin.Length < 4 || pin.Length > 32))
         {
+            await tx.RollbackAsync(ct);
             return ApiResult<object>.Fail(ErrorCodes.ValidationError, "PIN must be 4-32 characters.");
         }
 
@@ -58,7 +70,9 @@ public class DashboardShareService(NpgsqlDataSource dataSource, IConfiguration c
             TokenHash = ShareCrypto.HashToken(token),
             PinHash = ShareCrypto.HashPin(actualPin),
             CreatedBy = createdBy, ExpiresAt = expiresAt
-        });
+        }, tx);
+
+        await tx.CommitAsync(ct);
 
         var publicUrl = (configuration["Oauth:PublicUrl"] ?? "http://localhost").TrimEnd('/');
         return ApiResult<object>.Ok(new
@@ -113,17 +127,21 @@ public class DashboardShareService(NpgsqlDataSource dataSource, IConfiguration c
     public async Task RegisterPinFailureAsync(Guid shareId, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
         var failed = await conn.ExecuteScalarAsync<int>("""
             UPDATE dashboard_shares SET failed_pin_count = failed_pin_count + 1
             WHERE id = @Id RETURNING failed_pin_count
-            """, new { Id = shareId });
+            """, new { Id = shareId }, tx);
         var lockedUntil = ShareCrypto.NextLockout(failed, DateTime.UtcNow);
         if (lockedUntil is not null)
         {
             await conn.ExecuteAsync(
                 "UPDATE dashboard_shares SET locked_until = @Until WHERE id = @Id",
-                new { Until = lockedUntil, Id = shareId });
+                new { Until = lockedUntil, Id = shareId }, tx);
         }
+
+        await tx.CommitAsync(ct);
     }
 
     public async Task ResetPinFailuresAsync(Guid shareId, CancellationToken ct)
