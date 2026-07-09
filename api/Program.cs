@@ -241,6 +241,7 @@ builder.Services.AddScoped<DashboardService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton(sp =>
     new QueryGuideService(Path.Combine(sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath, "storage")));
+builder.Services.AddSingleton<ShareSessionProtector>();
 builder.Services.AddSingleton<ConnectionConcurrencyLimiter>();
 builder.Services.AddSingleton<AiTokenBudgetService>();
 builder.Services.AddSingleton<SecretProtector>();
