@@ -66,6 +66,7 @@ MCP Dataset Manager takes a different approach:
 | Knowledge memory | Store metric definitions, column meanings, business rules, join hints, notes, and imported documents per dataset. | Business context survives across sessions and agents. |
 | Multi-dataset joins | Join several uploaded file datasets by alias in one DuckDB SQL query. | Agents can answer questions across related spreadsheets. |
 | AI dashboards | Agents save frozen SQL + chart config as widgets; dashboards rerun SQL on view/refresh. | A one-time chat can create a live dashboard. |
+| Custom realtime dashboards | Agents can design a full custom HTML dashboard page instead of a fixed widget grid; it stays live off the same frozen-SQL endpoints. | A dashboard can look like anything Claude designs, not just a grid of chart tiles. |
 | Dashboard sharing | Owners or agents mint per-viewer share links protected by a PIN; viewers see live data without an account; each link is revocable independently. | A manager can watch a dashboard from a link, and a leaked link can be killed instantly. |
 | Static HTML export | Dashboards export as a self-contained snapshot HTML file, optionally AES-GCM-encrypted behind a PIN. | Reports can travel over email/chat without exposing the server or the data. |
 | Proof-of-read query gate | PAT-authenticated agents must read the query guide (`guide_token`) and the dataset schema (`schema_token`) before any query or widget SQL is accepted. | Agents cannot write SQL from stale memory or invent table names. |
@@ -362,6 +363,7 @@ PAT-authenticated agents cannot query from memory. The server enforces a statele
 - Save-time validation also trial-runs the query with a small limit to catch bad columns/tables early.
 - Widget data is row-capped and cached by refresh interval.
 - Widget creation and SQL updates through a PAT require the dataset's `schema_token` (same proof-of-read gate as queries).
+- A dashboard can also carry one custom HTML page (`kind='custom'`) instead of the default widget grid. It runs behind a `Content-Security-Policy: sandbox` with no network access of its own; data reaches it one-way via `postMessage`, and only the dashboard owner can see the underlying endpoints' SQL.
 
 ### Dashboard Share Links
 
