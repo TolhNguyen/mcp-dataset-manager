@@ -27,6 +27,7 @@ const EdmPageEmbed = {
         let ready = false;
         let disposed = false;
         const intervals = [];
+        const gens = new Map(); // widget_id -> generation, chặn response cũ ghi đè data mới hơn
 
         function post() {
             if (disposed || !iframe.contentWindow) return;
@@ -39,18 +40,26 @@ const EdmPageEmbed = {
 
         async function refreshWidget(w) {
             if (disposed) return;
+            // Hai lần refresh cùng widget có thể chồng lấn (request chậm của tick trước còn
+            // pending khi tick sau bắn). Đánh số generation: chỉ response của lần gọi mới nhất
+            // được ghi vào entries — response cũ về muộn thành no-op, không ghi đè data mới.
+            const gen = (gens.get(w.widget_id) || 0) + 1;
+            gens.set(w.widget_id, gen);
+            let entry;
             try {
                 const table = await fetchWidgetData(w.widget_id) || {};
-                entries.set(w.widget_id, {
+                entry = {
                     id: w.widget_id, title: w.title,
                     columns: table.columns || [], rows: table.rows || []
-                });
+                };
             } catch (err) {
-                entries.set(w.widget_id, {
+                entry = {
                     id: w.widget_id, title: w.title, columns: [], rows: [],
                     error: (err && err.message) || 'Không tải được dữ liệu.'
-                });
+                };
             }
+            if (disposed || gens.get(w.widget_id) !== gen) return;
+            entries.set(w.widget_id, entry);
             if (ready) post();
         }
 
