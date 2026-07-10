@@ -90,6 +90,7 @@ const SharePage = {
         this.clearAllCharts();
         if (this.pageEmbed) { this.pageEmbed.destroy(); this.pageEmbed = null; }
         $('#customView').hidden = true;
+        $('#customWarning').hidden = true;
         $('#dash').hidden = true;
         $('#pin-gate').hidden = false;
     },
@@ -134,6 +135,7 @@ const SharePage = {
             return;
         }
         $('#customView').hidden = true;
+        $('#customWarning').hidden = true;
         $('#widgetGrid').hidden = false;
 
         const widgets = data.widgets || [];
@@ -154,6 +156,7 @@ const SharePage = {
     showCustomDashboard(data) {
         $('#widgetGrid').hidden = true;
         $('#widgetGrid').innerHTML = '';
+        $('#customWarning').hidden = true; // reset cảnh báo cũ trước khi mount lại (giống dashboards.js)
         this.clearAllCharts();
 
         const view = $('#customView');
