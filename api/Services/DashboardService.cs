@@ -457,6 +457,80 @@ public class DashboardService(
     }
 
     // ============================================================
+    // Custom page (kind='custom'): trang HTML do AI dựng, serve qua route CSP-sandbox
+    // ============================================================
+
+    /// <summary>
+    /// Upsert trang HTML cho dashboard kind='custom', addressing theo tên (convention giống
+    /// EnsureDashboardByNameAsync để agent không cần lookup trước). Dashboard cùng tên nhưng
+    /// kind='grid' bị từ chối (DASHBOARD_KIND_MISMATCH) — không bao giờ tự đổi kind.
+    /// KHÔNG sanitize html: ranh giới an ninh là CSP sandbox lúc serve, không phải lúc lưu.
+    /// </summary>
+    public async Task<ApiResult<object>> SetPageByNameAsync(
+        Guid userId, string? dashboardName, string? html, string source, string createdBy, CancellationToken ct)
+    {
+        var htmlError = DashboardPageGuard.ValidateHtml(html);
+        if (htmlError is not null)
+        {
+            return ApiResult<object>.Fail(ErrorCodes.ValidationError, htmlError);
+        }
+
+        var (dashboard, error) = await EnsureDashboardCoreAsync(
+            userId, dashboardName, null, source, createdBy, allowExisting: true, DashboardGuard.KindCustom, ct);
+        if (error is not null) return error;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+
+        await conn.ExecuteAsync("""
+            INSERT INTO dashboard_pages (dashboard_id, html, created_by)
+            VALUES (@DashboardId, @Html, @CreatedBy)
+            ON CONFLICT (dashboard_id) DO UPDATE
+            SET html = EXCLUDED.html, created_by = EXCLUDED.created_by, updated_at = NOW()
+            """, new { DashboardId = dashboard!.Id, Html = html, CreatedBy = createdBy });
+
+        var endpoints = (await conn.QueryAsync<(Guid WidgetId, string Title)>("""
+            SELECT id AS WidgetId, title AS Title
+            FROM dashboard_widgets
+            WHERE dashboard_id = @DashboardId AND archived_at IS NULL
+            ORDER BY position, created_at
+            """, new { DashboardId = dashboard.Id })).ToList();
+
+        var updatedAt = await conn.ExecuteScalarAsync<DateTime>(
+            "SELECT updated_at FROM dashboard_pages WHERE dashboard_id = @Id", new { Id = dashboard.Id });
+
+        // Oauth:PublicUrl là issuer công khai (production: https) — dùng làm base cho view link
+        // trả về agent, vì agent/user mở link ngoài origin của API nội bộ.
+        var baseUrl = (configuration["Oauth:PublicUrl"] ?? "").TrimEnd('/');
+
+        return ApiResult<object>.Ok(new
+        {
+            dashboard_id = dashboard.Id,
+            name = dashboard.Name,
+            kind = dashboard.Kind,
+            view_url = $"{baseUrl}/dashboards.html?id={dashboard.Id}",
+            endpoints = endpoints.Select(e => new { widget_id = e.WidgetId, title = e.Title }).ToList(),
+            html_bytes = System.Text.Encoding.UTF8.GetByteCount(html!),
+            updated_at = updatedAt
+        });
+    }
+
+    /// <summary>
+    /// HTML trang custom, scoped theo ownership (join dashboards.user_id). Trả null khi không có
+    /// page hoặc dashboard không thuộc user — caller trả 404, không phân biệt 2 trường hợp
+    /// (tránh existence oracle). Share route gọi với share.UserId (chủ share) nên cùng path này.
+    /// </summary>
+    public async Task<string?> GetPageHtmlAsync(Guid userId, Guid dashboardId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<string?>("""
+            SELECT p.html
+            FROM dashboard_pages p
+            JOIN dashboards d ON d.id = p.dashboard_id
+            WHERE d.id = @DashboardId AND d.user_id = @UserId
+            """, new { DashboardId = dashboardId, UserId = userId });
+    }
+
+    // ============================================================
     // Widget data execution (frozen SQL re-validated + row-capped + cached)
     // ============================================================
 
@@ -555,13 +629,17 @@ public class DashboardService(
     public async Task<ApiResult<object>> GetShareViewAsync(Guid userId, Guid dashboardId, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var name = await conn.ExecuteScalarAsync<string?>(
-            "SELECT name FROM dashboards WHERE id = @Id AND user_id = @UserId",
+        var dashboard = await conn.QuerySingleOrDefaultAsync<Dashboard>(
+            SelectDashboardSql + " WHERE id = @Id AND user_id = @UserId",
             new { Id = dashboardId, UserId = userId });
-        if (name is null)
+        if (dashboard is null)
         {
             return ApiResult<object>.Fail(ErrorCodes.DashboardNotFound, "Dashboard not found.");
         }
+
+        var hasPage = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM dashboard_pages WHERE dashboard_id = @Id",
+            new { Id = dashboardId }) > 0;
 
         var widgets = (await conn.QueryAsync<ShareWidgetRow>("""
             SELECT w.id AS WidgetId, w.title AS Title, w.chart_type AS ChartType,
@@ -573,7 +651,9 @@ public class DashboardService(
 
         return ApiResult<object>.Ok(new
         {
-            dashboard_name = name,
+            dashboard_name = dashboard.Name,
+            kind = dashboard.Kind,
+            has_page = hasPage,
             widgets = widgets.Select(w => new
             {
                 widget_id = w.WidgetId,
