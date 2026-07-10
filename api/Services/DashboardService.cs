@@ -33,7 +33,7 @@ public class DashboardService(
 {
     private const string SelectDashboardSql = """
         SELECT id AS Id, user_id AS UserId, name AS Name, description AS Description,
-               created_by AS CreatedBy, created_at AS CreatedAt, updated_at AS UpdatedAt
+               kind AS Kind, created_by AS CreatedBy, created_at AS CreatedAt, updated_at AS UpdatedAt
         FROM dashboards
         """;
 
@@ -65,29 +65,39 @@ public class DashboardService(
 
     public Task<ApiResult<object>> CreateDashboardAsync(
         Guid userId, string? name, string? description, string source, string createdBy, CancellationToken ct)
-        => CreateOrEnsureDashboardAsync(userId, name, description, source, createdBy, allowExisting: false, ct);
+        => WrapEnsure(EnsureDashboardCoreAsync(userId, name, description, source, createdBy,
+            allowExisting: false, DashboardGuard.KindGrid, ct));
 
     /// <summary>Returns the existing dashboard by (user, name) if one exists, else creates it
     /// (respecting the per-user cap). Used by the MCP convenience tool so an agent can address a
     /// dashboard by name without first checking whether it exists.</summary>
     public Task<ApiResult<object>> EnsureDashboardByNameAsync(
         Guid userId, string? name, string source, string createdBy, CancellationToken ct)
-        => CreateOrEnsureDashboardAsync(userId, name, null, source, createdBy, allowExisting: true, ct);
+        => WrapEnsure(EnsureDashboardCoreAsync(userId, name, null, source, createdBy,
+            allowExisting: true, DashboardGuard.KindGrid, ct));
 
-    private async Task<ApiResult<object>> CreateOrEnsureDashboardAsync(
-        Guid userId, string? name, string? description, string source, string createdBy, bool allowExisting,
-        CancellationToken ct)
+    private static async Task<ApiResult<object>> WrapEnsure(Task<(Dashboard? Dashboard, ApiResult<object>? Error)> task)
+    {
+        var (dashboard, error) = await task;
+        return error ?? ApiResult<object>.Ok(BuildDashboardDto(dashboard!));
+    }
+
+    /// <summary>Core ensure/create trả record thật (không phải DTO) để các caller nội bộ —
+    /// SetPageByNameAsync (Task 3) — dùng tiếp dashboard.Id/Kind mà không phải đọc dynamic.</summary>
+    private async Task<(Dashboard? Dashboard, ApiResult<object>? Error)> EnsureDashboardCoreAsync(
+        Guid userId, string? name, string? description, string source, string createdBy,
+        bool allowExisting, string kind, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return ApiResult<object>.Fail(ErrorCodes.ValidationError, "name is required.");
+            return (null, ApiResult<object>.Fail(ErrorCodes.ValidationError, "name is required."));
         }
 
         var trimmedName = name.Trim();
         if (trimmedName.Length > DashboardGuard.MaxTitleChars)
         {
-            return ApiResult<object>.Fail(
-                ErrorCodes.ValidationError, $"name must be at most {DashboardGuard.MaxTitleChars} characters.");
+            return (null, ApiResult<object>.Fail(
+                ErrorCodes.ValidationError, $"name must be at most {DashboardGuard.MaxTitleChars} characters."));
         }
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
@@ -108,8 +118,16 @@ public class DashboardService(
 
             if (existing is not null)
             {
+                if (!string.Equals(existing.Kind, kind, StringComparison.Ordinal))
+                {
+                    await tx.RollbackAsync(ct);
+                    return (null, ApiResult<object>.Fail(
+                        ErrorCodes.DashboardKindMismatch,
+                        $"Dashboard '{existing.Name}' đã tồn tại với kind '{existing.Kind}' — không thể dùng làm dashboard '{kind}'. Chọn tên khác.",
+                        new { dashboard_id = existing.Id, kind = existing.Kind }));
+                }
                 await tx.CommitAsync(ct);
-                return ApiResult<object>.Ok(BuildDashboardDto(existing));
+                return (existing, null);
             }
         }
 
@@ -119,20 +137,21 @@ public class DashboardService(
         if (count >= DashboardGuard.MaxDashboardsPerUser)
         {
             await tx.RollbackAsync(ct);
-            return ApiResult<object>.Fail(
+            return (null, ApiResult<object>.Fail(
                 ErrorCodes.DashboardLimitReached,
                 $"You have reached the {DashboardGuard.MaxDashboardsPerUser}-dashboard limit.",
-                new { max_dashboards = DashboardGuard.MaxDashboardsPerUser, current_count = count });
+                new { max_dashboards = DashboardGuard.MaxDashboardsPerUser, current_count = count }));
         }
 
         var dashboardId = Guid.NewGuid();
 
         await conn.ExecuteAsync("""
-            INSERT INTO dashboards (id, user_id, name, description, created_by)
-            VALUES (@Id, @UserId, @Name, @Description, @CreatedBy)
+            INSERT INTO dashboards (id, user_id, name, description, kind, created_by)
+            VALUES (@Id, @UserId, @Name, @Description, @Kind, @CreatedBy)
             """, new
         {
-            Id = dashboardId, UserId = userId, Name = trimmedName, Description = description, CreatedBy = createdBy
+            Id = dashboardId, UserId = userId, Name = trimmedName, Description = description,
+            Kind = kind, CreatedBy = createdBy
         }, tx);
 
         var created = await conn.QuerySingleAsync<Dashboard>(
@@ -140,7 +159,7 @@ public class DashboardService(
 
         await tx.CommitAsync(ct);
 
-        return ApiResult<object>.Ok(BuildDashboardDto(created));
+        return (created, null);
     }
 
     public async Task<ApiResult<object>> ListDashboardsAsync(Guid userId, CancellationToken ct)
@@ -592,6 +611,7 @@ public class DashboardService(
         dashboard_id = d.Id,
         name = d.Name,
         description = d.Description,
+        kind = d.Kind,
         created_by = d.CreatedBy,
         created_at = d.CreatedAt,
         updated_at = d.UpdatedAt

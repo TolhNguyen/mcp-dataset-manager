@@ -12,6 +12,9 @@ public static class DashboardGuard
 {
     public static readonly string[] ChartTypes = ["table", "line", "bar", "pie", "stat"];
 
+    public const string KindGrid = "grid";
+    public const string KindCustom = "custom";
+
     public const int MinRefreshSec = 30;
     public const int MaxWidgetsPerDashboard = 20;
     public const int MaxDashboardsPerUser = 10;

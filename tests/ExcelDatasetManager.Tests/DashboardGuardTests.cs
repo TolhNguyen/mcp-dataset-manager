@@ -117,4 +117,13 @@ public class DashboardGuardTests
     {
         Assert.Equal(120, DashboardGuard.ClampRefresh(120));
     }
+
+    // ---------- Kind constants ----------
+
+    [Fact]
+    public void Kind_constants_are_grid_and_custom()
+    {
+        Assert.Equal("grid", DashboardGuard.KindGrid);
+        Assert.Equal("custom", DashboardGuard.KindCustom);
+    }
 }

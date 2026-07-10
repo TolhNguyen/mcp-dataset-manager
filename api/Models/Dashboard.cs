@@ -1,7 +1,7 @@
 namespace ExcelDatasetManager.Api.Models;
 
 public record Dashboard(
-    Guid Id, Guid UserId, string Name, string? Description, string CreatedBy,
+    Guid Id, Guid UserId, string Name, string? Description, string Kind, string CreatedBy,
     DateTime CreatedAt, DateTime UpdatedAt);
 
 public record DashboardWidget(

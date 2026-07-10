@@ -1,0 +1,9 @@
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS kind VARCHAR(10) NOT NULL DEFAULT 'grid';
+
+CREATE TABLE IF NOT EXISTS dashboard_pages (
+    dashboard_id UUID PRIMARY KEY REFERENCES dashboards(id) ON DELETE CASCADE,
+    html TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
