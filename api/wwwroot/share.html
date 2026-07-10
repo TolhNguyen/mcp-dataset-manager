@@ -34,6 +34,8 @@
             <h1 style="margin:0;font-size:20px"></h1>
         </header>
         <div id="widgetGrid" class="widget-grid"></div>
+        <div id="customWarning" class="status-msg error" hidden></div>
+        <div id="customView" hidden></div>
     </section>
 </main>
 
@@ -45,6 +47,8 @@
 <script src="/js/chart.umd.min.js?v=20260710-share"></script>
 <!-- Chart render pipeline shared with dashboards.js — must load before share.js. -->
 <script src="/js/chart-render.js?v=20260710-share"></script>
-<script src="/js/share.js?v=20260710-share"></script>
+<!-- Shell pump for dashboard kind='custom' (shared with dashboards.js) — must load before share.js. -->
+<script src="/js/page-embed.js?v=20260710-custom"></script>
+<script src="/js/share.js?v=20260710-custom"></script>
 </body>
 </html>
