@@ -4,10 +4,11 @@ using ExcelDatasetManager.Api.Services;
 namespace ExcelDatasetManager.Api.Endpoints;
 
 /// <summary>
-/// The ONLY three routes an anonymous share viewer can reach. Every route re-resolves the
+/// The ONLY four routes an anonymous share viewer can reach. Every route re-resolves the
 /// share row first (revoke/expiry wins over any cookie), and every invalid token yields a
 /// bare 404 — never a reason — so the routes can't be used as an existence oracle.
 /// No route here accepts SQL, and no response contains SQL.
+/// `/page` serve HTML custom dưới CSP sandbox (không SQL, không cookie chạm được từ trong trang).
 /// </summary>
 public static class ShareEndpoints
 {
@@ -110,6 +111,24 @@ public static class ShareEndpoints
                 : Results.NotFound();
         })
         .RequireRateLimiting("query");
+
+        // Trang HTML custom (kind='custom') cho share viewer — cùng session gate như 3 route trên.
+        // KHÔNG dùng ApplyShareHeaders: response này là document AI dựng, cần CSP sandbox riêng
+        // (DashboardPageHeaders) chứ không phải CSP của shell.
+        app.MapGet("/api/share/{token}/page", async (
+            string token, HttpContext ctx,
+            DashboardShareService shares, ShareSessionProtector protector, DashboardService dashboards,
+            CancellationToken ct) =>
+        {
+            var share = await shares.ResolveAsync(token, ct);
+            if (share is null || !HasValidSession(ctx, protector, share.Id)) return Results.NotFound();
+
+            var html = await dashboards.GetPageHtmlAsync(share.UserId, share.DashboardId, ct);
+            if (html is null) return Results.NotFound();
+
+            DashboardPageHeaders.Apply(ctx);
+            return Results.Text(html, "text/html", System.Text.Encoding.UTF8);
+        });
     }
 
     private static string CookieName(Guid shareId) => $"edm_share_{shareId:N}";

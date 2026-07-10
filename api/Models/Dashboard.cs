@@ -18,3 +18,6 @@ public record CreateDashboardRequest(string? Name, string? Description);
 public record CreateWidgetByDashboardNameRequest(string? DashboardName, Guid? DatasetId, string? Title,
     string? Sql, string? ChartType, System.Text.Json.JsonElement? ChartConfig, int? RefreshIntervalSec,
     string? SchemaToken = null);
+
+// MCP convenience: upsert trang HTML custom, addressing dashboard theo tên (tự tạo kind='custom').
+public record SetPageByNameRequest(string? DashboardName, string? Html);
