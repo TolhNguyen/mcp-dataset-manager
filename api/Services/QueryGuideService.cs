@@ -117,5 +117,17 @@ public class QueryGuideService
         - Save durable business facts with `save_dataset_knowledge` when the user teaches you something,
           following `memory_instructions` from get_context. If a dataset has AI knowledge-writing
           disabled you will get `KNOWLEDGE_WRITE_DISABLED` - report it, do not retry.
+
+        ## Dashboards & reports (visual-first)
+        When the user asks for a "dashboard" or "report", FIRST decide (ask ONE question if unclear):
+        - SNAPSHOT (one-off, frozen data): query the data, then build an HTML artifact in chat with
+          the data embedded. Do NOT call dashboard tools.
+        - REALTIME (data must be fresh every time it is opened): create one endpoint per query with
+          create_dashboard_widget (same dashboard_name), then build the page and call
+          set_dashboard_html (its description contains the REQUIRED postMessage contract), and give
+          the user the returned view_url.
+        Always visual-first for both kinds: prefer charts and KPI tiles over raw tables, with
+        artifact-quality layout. Only the dashboard owner (or Claude via their PAT) can edit
+        endpoint SQL; share viewers can never see SQL.
         """;
 }

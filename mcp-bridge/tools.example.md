@@ -513,10 +513,13 @@ response_hint: |
 type: tool
 name: create_dashboard_widget
 description: |
-  Khi người dùng muốn theo dõi một chỉ số thường xuyên, tạo widget để họ xem
-  realtime trên dashboard mà không cần hỏi lại bạn. SQL phải là SELECT/WITH
-  read-only trên đúng dataset. Nếu dashboard_name chưa tồn tại, server sẽ tự
-  tạo dashboard mới với tên đó — không cần gọi list_dashboards trước.
+  Tạo một endpoint dữ liệu (widget) cho dashboard. Với dashboard REALTIME
+  kind='custom' (xem set_dashboard_html), mỗi endpoint là một câu SQL đóng
+  băng mà trang HTML nhận data qua postMessage. Với dashboard grid thường,
+  widget hiển thị trực tiếp trên web app. SQL phải là SELECT/WITH read-only
+  trên đúng dataset. Nếu dashboard_name chưa tồn tại, server tự tạo dashboard
+  grid mới với tên đó — muốn dashboard custom thì gọi set_dashboard_html
+  (trước hoặc sau đều được, nhưng tên phải nhất quán).
 connection: edm
 method: POST
 path: /api/dashboards/widgets
@@ -600,10 +603,11 @@ response_hint: |
 type: tool
 name: get_dashboard
 description: |
-  Fetch one dashboard's metadata plus all of its active widgets (title, sql,
-  chart_type, chart_config, refresh_interval_sec, position). Use this to show
-  the user what's already on a dashboard, or to find a widget_id before
-  calling update_dashboard_widget.
+  Fetch one dashboard's metadata (including kind: 'grid' | 'custom') plus all
+  of its active widgets/endpoints (title, sql, chart_type, chart_config,
+  refresh_interval_sec, position). Use this to show the user what's already
+  on a dashboard, to review/edit an endpoint's SQL when the user asks, or to
+  find a widget_id before calling update_dashboard_widget.
 connection: edm
 method: GET
 path: /api/dashboards/{dashboard_id}
@@ -614,9 +618,11 @@ params:
     required: true
     description: UUID from list_dashboards.
 response_hint: |
-  Shape: {success, data: {dashboard: {...}, widgets: [...]}}. Each widget has
-  widget_id, dashboard_id, dataset_id, title, sql, chart_type, chart_config,
-  refresh_interval_sec, position, source.
+  Shape: {success, data: {dashboard: {dashboard_id, name, kind, ...},
+  widgets: [...]}}. Each widget has widget_id, dashboard_id, dataset_id,
+  title, sql, chart_type, chart_config, refresh_interval_sec, position,
+  source. Với dashboard kind='custom', widgets chính là các endpoint của
+  trang HTML — sql ở đây là chỗ xem/sửa query khi người dùng yêu cầu.
   error.code=DASHBOARD_NOT_FOUND means the id doesn't belong to this user.
 ```
 
@@ -678,6 +684,67 @@ response_hint: |
   an existing widget owned by this user.
   error.code=VALIDATION_ERROR means the new sql/title/chart_type didn't pass
   validation.
+```
+
+## set_dashboard_html
+
+```yaml
+type: tool
+name: set_dashboard_html
+description: |
+  Đặt/thay trang HTML tuỳ chỉnh cho một dashboard REALTIME (kind='custom').
+  Dùng khi người dùng muốn dashboard xem lại lúc nào cũng ra data mới, với
+  giao diện đẹp tự do như artifact.
+
+  QUY TRÌNH BẮT BUỘC khi người dùng yêu cầu "tạo dashboard/báo cáo":
+  1. Xác định loại: SNAPSHOT (xem một lần, data đóng băng → dựng artifact
+     ngay trong chat, KHÔNG dùng tool này) hay REALTIME (mở lại thấy data
+     mới → dùng tool này). Không rõ thì hỏi người dùng MỘT câu rồi mới làm.
+  2. REALTIME: tạo từng endpoint bằng create_dashboard_widget (mỗi endpoint
+     = 1 câu SQL, cần schema_token), cùng dashboard_name.
+  3. Dựng trang HTML hoàn chỉnh (visual-first: ưu tiên chart/KPI tile hơn
+     bảng số liệu; chất lượng thiết kế như artifact) rồi gọi tool này.
+  4. Gửi view_url trong response cho người dùng.
+
+  CONTRACT của trang HTML (bắt buộc — trang chạy trong CSP sandbox, KHÔNG
+  fetch được gì; data do server bơm vào qua postMessage):
+  - Không dùng fetch/XHR/WebSocket. Thư viện ngoài chỉ được load từ
+    https://cdnjs.cloudflare.com (ví dụ Chart.js).
+  - Phải có skeleton này:
+      window.addEventListener('message', (e) => {
+        if (!e.data || e.data.type !== 'edm:data') return;
+        // e.data.endpoints = [{id, title, columns:[{name,type}], rows:[[..]], error?}]
+        render(e.data.endpoints);   // hàm bạn tự viết — vẽ lại TOÀN BỘ trang
+      });
+      parent.postMessage({ type: 'edm:ready' }, '*');
+  - endpoints khớp với các widget đã tạo (id = widget_id). Entry có field
+    `error` thì hiện trạng thái lỗi cho chart đó, các chart khác vẫn vẽ.
+  - render() phải idempotent: được gọi lại mỗi lần data refresh (server tự
+    bơm lại theo refresh_interval_sec của từng endpoint).
+connection: edm
+method: PUT
+path: /api/dashboards/page
+params:
+  dashboard_name:
+    in: body
+    type: string
+    required: true
+    description: Tên dashboard (tự tạo kind='custom' nếu chưa tồn tại). Phải trùng dashboard_name đã dùng ở create_dashboard_widget.
+  html:
+    in: body
+    type: string
+    required: true
+    description: Trang HTML hoàn chỉnh (<!DOCTYPE html>...), tối đa 2MB, theo đúng CONTRACT trong description.
+response_hint: |
+  Shape: {success, data: {dashboard_id, name, kind, view_url, endpoints:
+  [{widget_id, title}], html_bytes, updated_at}}. GỬI view_url cho người
+  dùng — họ mở link đó (cần đăng nhập; muốn gửi người ngoài thì gọi
+  share_dashboard). Đối chiếu endpoints với các widget bạn đã tạo — thiếu
+  cái nào thì tạo bổ sung bằng create_dashboard_widget rồi không cần gọi
+  lại tool này (trang nhận data theo widget_id lúc runtime).
+  error.code=DASHBOARD_KIND_MISMATCH nghĩa là tên này đã là dashboard grid
+  thường — chọn dashboard_name khác.
+  error.code=VALIDATION_ERROR: html thiếu hoặc quá 2MB.
 ```
 
 ## share_dashboard
