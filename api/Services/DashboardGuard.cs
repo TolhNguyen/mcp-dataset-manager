@@ -15,6 +15,9 @@ public static class DashboardGuard
     public const string KindGrid = "grid";
     public const string KindCustom = "custom";
 
+    /// <summary>True when the value is exactly one of the known dashboard kinds (case-sensitive).</summary>
+    public static bool IsValidKind(string? kind) => kind is KindGrid or KindCustom;
+
     public const int MinRefreshSec = 30;
     public const int MaxWidgetsPerDashboard = 20;
     public const int MaxDashboardsPerUser = 10;

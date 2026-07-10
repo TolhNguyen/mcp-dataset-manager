@@ -66,15 +66,17 @@ public class DashboardService(
     public Task<ApiResult<object>> CreateDashboardAsync(
         Guid userId, string? name, string? description, string source, string createdBy, CancellationToken ct)
         => WrapEnsure(EnsureDashboardCoreAsync(userId, name, description, source, createdBy,
-            allowExisting: false, DashboardGuard.KindGrid, ct));
+            allowExisting: false, DashboardGuard.KindGrid, enforceKindOnExisting: true, ct));
 
     /// <summary>Returns the existing dashboard by (user, name) if one exists, else creates it
     /// (respecting the per-user cap). Used by the MCP convenience tool so an agent can address a
-    /// dashboard by name without first checking whether it exists.</summary>
+    /// dashboard by name without first checking whether it exists. <paramref name="kind"/> only
+    /// governs CREATION when the dashboard doesn't exist yet: widgets are legitimate in both
+    /// kinds (an endpoint IS a widget), so an existing dashboard is returned whatever its kind.</summary>
     public Task<ApiResult<object>> EnsureDashboardByNameAsync(
-        Guid userId, string? name, string source, string createdBy, CancellationToken ct)
+        Guid userId, string? name, string kind, string source, string createdBy, CancellationToken ct)
         => WrapEnsure(EnsureDashboardCoreAsync(userId, name, null, source, createdBy,
-            allowExisting: true, DashboardGuard.KindGrid, ct));
+            allowExisting: true, kind, enforceKindOnExisting: false, ct));
 
     private static async Task<ApiResult<object>> WrapEnsure(Task<(Dashboard? Dashboard, ApiResult<object>? Error)> task)
     {
@@ -86,7 +88,7 @@ public class DashboardService(
     /// SetPageByNameAsync (Task 3) — dùng tiếp dashboard.Id/Kind mà không phải đọc dynamic.</summary>
     private async Task<(Dashboard? Dashboard, ApiResult<object>? Error)> EnsureDashboardCoreAsync(
         Guid userId, string? name, string? description, string source, string createdBy,
-        bool allowExisting, string kind, CancellationToken ct)
+        bool allowExisting, string kind, bool enforceKindOnExisting, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -118,7 +120,10 @@ public class DashboardService(
 
             if (existing is not null)
             {
-                if (!string.Equals(existing.Kind, kind, StringComparison.Ordinal))
+                // Widgets are legitimate in both kinds (an endpoint IS a widget) — only the HTML
+                // page is kind-specific. Callers that merely attach widgets pass
+                // enforceKindOnExisting: false and accept the existing dashboard whatever its kind.
+                if (enforceKindOnExisting && !string.Equals(existing.Kind, kind, StringComparison.Ordinal))
                 {
                     await tx.RollbackAsync(ct);
                     return (null, ApiResult<object>.Fail(
@@ -476,7 +481,8 @@ public class DashboardService(
         }
 
         var (dashboard, error) = await EnsureDashboardCoreAsync(
-            userId, dashboardName, null, source, createdBy, allowExisting: true, DashboardGuard.KindCustom, ct);
+            userId, dashboardName, null, source, createdBy,
+            allowExisting: true, DashboardGuard.KindCustom, enforceKindOnExisting: true, ct);
         if (error is not null) return error;
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);

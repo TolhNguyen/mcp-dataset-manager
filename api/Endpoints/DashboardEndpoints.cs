@@ -177,9 +177,16 @@ public static class DashboardEndpoints
                 principal, userId.Value, req.DatasetId, req.SchemaToken, datasetService, dataSource, ct);
             if (gateError is not null) return gateError;
 
+            // dashboard_kind only governs which kind gets CREATED when dashboard_name doesn't
+            // exist yet; attaching a widget to an existing dashboard ignores it (both kinds hold
+            // widgets — an endpoint IS a widget).
+            var dashboardKind = string.IsNullOrWhiteSpace(req.DashboardKind) ? DashboardGuard.KindGrid : req.DashboardKind.Trim();
+            if (!DashboardGuard.IsValidKind(dashboardKind))
+                return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = $"dashboard_kind must be '{DashboardGuard.KindGrid}' or '{DashboardGuard.KindCustom}'." } });
+
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
 
-            var ensured = await dashboardService.EnsureDashboardByNameAsync(userId.Value, req.DashboardName, source, actor, ct);
+            var ensured = await dashboardService.EnsureDashboardByNameAsync(userId.Value, req.DashboardName, dashboardKind, source, actor, ct);
             if (!ensured.Success)
             {
                 return MapWriteResult(ensured);

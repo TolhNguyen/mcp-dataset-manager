@@ -123,7 +123,7 @@ public class QueryGuideService
         - SNAPSHOT (one-off, frozen data): query the data, then build an HTML artifact in chat with
           the data embedded. Do NOT call dashboard tools.
         - REALTIME (data must be fresh every time it is opened): create one endpoint per query with
-          create_dashboard_widget (same dashboard_name), then build the page and call
+          create_dashboard_widget (same dashboard_name, dashboard_kind:'custom'), then build the page and call
           set_dashboard_html (its description contains the REQUIRED postMessage contract), and give
           the user the returned view_url.
         Always visual-first for both kinds: prefer charts and KPI tiles over raw tables, with

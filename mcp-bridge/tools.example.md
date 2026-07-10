@@ -518,8 +518,10 @@ description: |
   băng mà trang HTML nhận data qua postMessage. Với dashboard grid thường,
   widget hiển thị trực tiếp trên web app. SQL phải là SELECT/WITH read-only
   trên đúng dataset. Nếu dashboard_name chưa tồn tại, server tự tạo dashboard
-  grid mới với tên đó — muốn dashboard custom thì gọi set_dashboard_html
-  (trước hoặc sau đều được, nhưng tên phải nhất quán).
+  mới với tên đó (kind theo dashboard_kind, mặc định grid) — muốn dashboard
+  custom thì gọi set_dashboard_html (trước hoặc sau đều được, nhưng tên phải
+  nhất quán; nếu tạo widget TRƯỚC cho dashboard realtime, truyền
+  dashboard_kind:'custom').
 connection: edm
 method: POST
 path: /api/dashboards/widgets
@@ -529,6 +531,11 @@ params:
     type: string
     required: true
     description: Tên dashboard để nhóm widget này vào; tự tạo nếu chưa tồn tại.
+  dashboard_kind:
+    in: body
+    type: string
+    enum: [grid, custom]
+    description: "Loại dashboard sẽ TẠO nếu dashboard_name chưa tồn tại: 'custom' cho dashboard realtime có trang HTML riêng (set_dashboard_html), 'grid' (mặc định) cho dashboard widget thường. Nếu dashboard đã tồn tại thì widget gắn vào nó bất kể kind — param này bị bỏ qua."
   dataset_id:
     in: body
     type: string
@@ -701,7 +708,9 @@ description: |
      ngay trong chat, KHÔNG dùng tool này) hay REALTIME (mở lại thấy data
      mới → dùng tool này). Không rõ thì hỏi người dùng MỘT câu rồi mới làm.
   2. REALTIME: tạo từng endpoint bằng create_dashboard_widget (mỗi endpoint
-     = 1 câu SQL, cần schema_token), cùng dashboard_name.
+     = 1 câu SQL, cần schema_token), cùng dashboard_name — truyền
+     dashboard_kind:'custom' ở mỗi lần gọi create_dashboard_widget (hoặc gọi
+     set_dashboard_html trước rồi tạo endpoint sau, cả hai thứ tự đều được).
   3. Dựng trang HTML hoàn chỉnh (visual-first: ưu tiên chart/KPI tile hơn
      bảng số liệu; chất lượng thiết kế như artifact) rồi gọi tool này.
   4. Gửi view_url trong response cho người dùng.

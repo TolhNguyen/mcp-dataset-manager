@@ -126,4 +126,16 @@ public class DashboardGuardTests
         Assert.Equal("grid", DashboardGuard.KindGrid);
         Assert.Equal("custom", DashboardGuard.KindCustom);
     }
+
+    // ---------- IsValidKind ----------
+
+    [Theory]
+    [InlineData("grid", true)]
+    [InlineData("custom", true)]
+    [InlineData("Grid", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    [InlineData("case", false)]
+    public void IsValidKind_accepts_only_exact_kinds(string? kind, bool expected)
+        => Assert.Equal(expected, DashboardGuard.IsValidKind(kind));
 }
