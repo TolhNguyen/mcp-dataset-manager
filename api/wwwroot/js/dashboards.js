@@ -30,6 +30,7 @@ const DashboardsPage = {
     charts: {},   // widget_id -> Chart.js instance, destroyed before re-creating
     datasetOptions: null, // cached [{dataset_id, name}] for the widget dataset picker
     editingWidgetId: null,
+    pageEmbed: null, // EdmPageEmbed instance của dashboard custom đang mở (destroy trước khi tạo mới)
 
     async init() {
         if (!AuthPage.requireAuth()) return;
@@ -54,6 +55,14 @@ const DashboardsPage = {
         window.addEventListener('beforeunload', () => this.clearAllTimers());
 
         await this.loadDashboards();
+
+        // Deep-link support: DashboardService.SetPageByNameAsync returns view_url with a
+        // `?id=` query param that MCP tools hand back to the user/agent — without this, that
+        // link silently dead-ends on the plain list. selectDashboard() already guards a
+        // bad/foreign id via its own try/catch (renders `.error` into #widgetGrid), so no
+        // extra guard is needed here.
+        const deepLinkId = new URLSearchParams(location.search).get('id');
+        if (deepLinkId) this.selectDashboard(deepLinkId);
     },
 
     // ============================================================
@@ -81,12 +90,17 @@ const DashboardsPage = {
             return;
         }
 
-        wrap.innerHTML = this.dashboards.map(d => `
+        wrap.innerHTML = this.dashboards.map(d => {
+            const kindBadge = d.kind === 'custom'
+                ? '<span class="badge badge-source">🧩 custom</span>'
+                : '';
+            return `
             <div class="dataset-item ${d.dashboard_id === this.currentDashboardId ? 'dataset-item-active' : ''}" data-id="${escapeHtml(d.dashboard_id)}">
                 <div class="dataset-head">
                     <div>
                         <div class="dataset-name">
                             <a href="#" data-action="open" data-id="${escapeHtml(d.dashboard_id)}">${escapeHtml(d.name)}</a>
+                            ${kindBadge}
                         </div>
                         <div class="dataset-meta">
                             ${d.description ? escapeHtml(d.description) + ' · ' : ''}${formatDate(d.created_at)}
@@ -96,7 +110,8 @@ const DashboardsPage = {
                         <button class="btn-danger" data-action="delete" data-id="${escapeHtml(d.dashboard_id)}">Xoá</button>
                     </div>
                 </div>
-            </div>`).join('');
+            </div>`;
+        }).join('');
 
         wrap.querySelectorAll('[data-action="open"]').forEach(el => {
             el.addEventListener('click', (e) => {
@@ -145,6 +160,7 @@ const DashboardsPage = {
             await Api.delete(`/api/dashboards/${id}`);
             if (id === this.currentDashboardId) {
                 this.clearAllTimers();
+                if (this.pageEmbed) { this.pageEmbed.destroy(); this.pageEmbed = null; }
                 this.currentDashboardId = null;
                 $('#detailCard').hidden = true;
             }
@@ -160,6 +176,10 @@ const DashboardsPage = {
 
     async selectDashboard(id) {
         this.clearAllTimers();
+        // Destroy any iframe embed from a previously-open custom dashboard BEFORE loading the
+        // next one (also covers re-selecting the same dashboard) — page-embed.js instances hold
+        // their own setIntervals/message listeners that must not survive navigation.
+        if (this.pageEmbed) { this.pageEmbed.destroy(); this.pageEmbed = null; }
         this.currentDashboardId = id;
         this.renderDashboardList();
 
@@ -168,12 +188,14 @@ const DashboardsPage = {
         $('#detailTitle').textContent = 'Đang tải…';
         $('#detailDescription').textContent = '';
         grid.innerHTML = '';
+        $('#customDash').hidden = true;
 
         try {
             const res = await Api.get(`/api/dashboards/${id}`);
             // Shape: { success, data: { dashboard: {...}, widgets: [...] } } — verified in
             // DashboardService.GetDashboardAsync, which returns
-            // ApiResult.Ok(new { dashboard = ..., widgets = ... }).
+            // ApiResult.Ok(new { dashboard = ..., widgets = ... }). `dashboard.kind` is
+            // 'grid' (classic widget grid, default) or 'custom' (AI-authored iframe page).
             const dashboard = res.data.dashboard;
             this.widgets = res.data.widgets || [];
             this.currentDashboardName = dashboard.name;
@@ -181,6 +203,15 @@ const DashboardsPage = {
             $('#detailTitle').textContent = dashboard.name;
             $('#detailDescription').textContent = dashboard.description || '';
 
+            if (dashboard.kind === 'custom') {
+                this.showCustomDashboard(id, dashboard, this.widgets);
+                return;
+            }
+
+            // kind === 'grid' (or unset/legacy): restore the classic widget grid in case we're
+            // coming back from a custom dashboard, which hides #widgetGrid/#addWidgetBtn below.
+            $('#widgetGrid').hidden = false;
+            $('#addWidgetBtn').hidden = false;
             this.renderWidgetGrid();
         } catch (err) {
             grid.innerHTML = `<p class="error">${escapeHtml(err.message)}</p>`;
@@ -305,6 +336,99 @@ const DashboardsPage = {
         Object.values(this.timers).forEach(t => clearInterval(t));
         this.timers = {};
         Object.keys(this.charts).forEach(id => EdmChartRender.destroyChart(this.charts, id));
+    },
+
+    // ============================================================
+    // Dashboard kind='custom': iframe sandbox (tab "Xem") + tab "Endpoints" (read-only:
+    // xem SQL, chạy thử). Không có UI sửa SQL — sửa qua Claude/MCP (update_widget), SQL được
+    // validate 2 lần phía server trước khi lưu.
+    // ============================================================
+
+    showCustomDashboard(id, dashboard, widgets) {
+        // Ẩn widget grid + nút thêm widget của dashboard grid (giữ nguyên tiêu đề/mô tả/nút chia
+        // sẻ ở header #detailCard — dùng chung cho cả hai loại dashboard).
+        $('#widgetGrid').innerHTML = '';
+        $('#widgetGrid').hidden = true;
+        $('#addWidgetBtn').hidden = true;
+
+        const wrap = $('#customDash');
+        wrap.hidden = false;
+        $('#customWarning').hidden = true;
+        $('#customEndpoints').hidden = true;
+        $('#customView').hidden = false;
+        $('#customView').innerHTML = '';
+
+        $('#tabViewBtn').onclick = () => {
+            $('#customEndpoints').hidden = true;
+            $('#customView').hidden = false;
+        };
+        $('#tabEndpointsBtn').onclick = () => {
+            $('#customView').hidden = true;
+            this.renderEndpointsTab(id, widgets);
+            $('#customEndpoints').hidden = false;
+        };
+
+        if (widgets.length === 0) {
+            $('#customView').innerHTML = '<p class="muted">Dashboard này chưa có endpoint nào.</p>';
+        }
+
+        this.pageEmbed = EdmPageEmbed.mount({
+            container: $('#customView'),
+            iframeSrc: `/api/dashboards/${id}/page/raw`,
+            widgets: widgets,
+            // Api.get() trả nguyên envelope { success, data } (xem js/api.js) — page-embed.js
+            // cần đối tượng compact_table {columns,rows} trực tiếp nên phải bóc `.data` ở đây,
+            // giống hệt convention loadWidgetData() ở trên (`const table = res.data`).
+            fetchWidgetData: (wid) => Api.get(`/api/dashboards/${id}/widgets/${wid}/data`)
+                .then(res => res.data || {}),
+            onWarning: (msg) => {
+                const box = $('#customWarning');
+                box.hidden = false;
+                box.textContent = msg;
+            }
+        });
+    },
+
+    renderEndpointsTab(id, widgets) {
+        const wrap = $('#customEndpoints');
+        if (widgets.length === 0) {
+            wrap.innerHTML = '<p class="muted">Chưa có endpoint nào. Nhờ Claude tạo bằng create_dashboard_widget.</p>';
+            return;
+        }
+        // Read-only theo spec: sửa SQL qua Claude/MCP (validate 2 lần) — UI chỉ xem + chạy thử.
+        wrap.innerHTML = widgets.map(w => `
+            <div class="widget-card" data-widget-id="${w.widget_id}">
+                <div class="widget-card-head">
+                    <div>
+                        <div class="widget-title">${escapeHtml(w.title)}</div>
+                        <span class="badge badge-source">dataset: ${escapeHtml(String(w.dataset_id))}</span>
+                        <span class="badge badge-source">refresh: ${w.refresh_interval_sec}s</span>
+                    </div>
+                    <button type="button" class="btn-link" data-action="tryrun" data-id="${w.widget_id}">Chạy thử</button>
+                </div>
+                <pre class="endpoint-sql">${escapeHtml(w.sql)}</pre>
+                <div class="widget-body" id="endpoint-result-${w.widget_id}" hidden></div>
+            </div>`).join('');
+
+        wrap.querySelectorAll('button[data-action="tryrun"]').forEach(btn => {
+            btn.addEventListener('click', () => this.tryRunEndpoint(id, btn.dataset.id, btn));
+        });
+    },
+
+    async tryRunEndpoint(dashboardId, widgetId, btn) {
+        const body = $(`#endpoint-result-${widgetId}`);
+        body.hidden = false;
+        body.innerHTML = '<p class="muted">Đang chạy…</p>';
+        btn.disabled = true;
+        try {
+            const res = await Api.get(`/api/dashboards/${dashboardId}/widgets/${widgetId}/data`);
+            const table = res.data || {};
+            EdmChartRender.renderTable(body, table.columns || [], table.rows || []);
+        } catch (err) {
+            body.innerHTML = `<div class="error">${escapeHtml(err.message || 'Chạy thử thất bại.')}</div>`;
+        } finally {
+            btn.disabled = false;
+        }
     },
 
     // ============================================================

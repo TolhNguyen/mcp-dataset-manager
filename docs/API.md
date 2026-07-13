@@ -373,7 +373,7 @@ Mỗi dataset → schema DuckDB theo `alias`. Tối đa `Query:MaxDatasetsPerQue
 ## Dashboards
 
 ### POST/GET `/api/dashboards` · GET/DELETE `/api/dashboards/{id}` — `JwtOnly`
-GET `{id}` trả dashboard + widget active. Tối đa 10 dashboard/user.
+GET `{id}` trả dashboard + widget active. Tối đa 10 dashboard/user. Dashboard DTO có thêm field `kind` (`grid` mặc định | `custom`).
 
 ### POST `/api/dashboards/{id}/widgets` — `KnowledgeWrite`
 ```json
@@ -388,7 +388,41 @@ SQL **đóng băng**, validate lúc lưu (theo dialect) + chạy thử `LIMIT 1`
 Chạy lại SQL đã đóng băng (re-validate + row cap `Dashboard:MaxRowsPerWidget` mặc định 1000 + timeout), cache in-memory theo TTL = refresh interval. Trả compact_table `{ columns, rows, row_count }` — **không** qua token budget (data đi ra browser).
 
 ### POST `/api/dashboards/widgets` — `KnowledgeWrite` (MCP tiện lợi)
-Body kèm `dashboard_name` → tự tạo dashboard theo tên nếu chưa có, rồi tạo widget.
+Body kèm `dashboard_name` (+ `dashboard_kind` tuỳ chọn ∈ `grid`|`custom`, mặc định `grid`) → tự tạo dashboard theo tên nếu chưa có, rồi tạo widget. `dashboard_kind` **chỉ** áp dụng khi phải tạo dashboard mới; nếu tên đã tồn tại (bất kể kind), field này bị bỏ qua và widget vẫn được gắn vào bình thường.
+
+## Dashboard custom page (kind='custom')
+
+Trang HTML tự do do AI dựng, thay thế/kèm với grid widget cho một dashboard. Xem `docs/ARCHITECTURE.md` mục "Custom page" cho contract postMessage đầy đủ.
+
+### PUT `/api/dashboards/page` — `KnowledgeWrite` (JWT/PAT owner)
+Body:
+```json
+{ "dashboard_name": "Ops realtime", "html": "<!doctype html>...<script>...</script>" }
+```
+Upsert theo `dashboard_name`; tự tạo dashboard `kind='custom'` nếu tên chưa tồn tại. `html` bắt buộc, cap 2MB (đếm theo byte UTF-8).
+
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "dashboard_id": "uuid",
+    "name": "Ops realtime",
+    "kind": "custom",
+    "view_url": "https://.../dashboards.html?id=uuid",
+    "endpoints": [ { "widget_id": "uuid", "title": "Doanh thu theo ngày" } ],
+    "html_bytes": 45210,
+    "updated_at": "2026-07-10T03:00:00Z"
+  }
+}
+```
+Lỗi: `VALIDATION_ERROR` (thiếu `html` hoặc vượt 2MB), `DASHBOARD_KIND_MISMATCH` (tên đã tồn tại với `kind='grid'` — không tự đổi kind), `DASHBOARD_LIMIT_REACHED` (phải tạo dashboard mới nhưng đã đủ 10/user).
+
+### GET `/api/dashboards/{id}/page/raw` — `JwtOnly`
+Trả HTML custom thô cho owner (dùng làm `src` của iframe trong `dashboards.html`, xác thực qua cookie JWT `edm_token`). `404` nếu dashboard không có `dashboard_pages` hoặc không thuộc user (không phân biệt 2 trường hợp). Response luôn kèm `Content-Security-Policy: sandbox allow-scripts; ...; connect-src 'none'` (`DashboardPageHeaders`) — mở thẳng URL này ngoài iframe vẫn an toàn vì tài liệu tự sandbox thành opaque origin (không cookie, không gọi API cùng origin).
+
+### GET `/api/share/{token}/page`
+Không cần header auth — xác thực bằng cookie phiên share (đặt bởi `POST /api/share/{token}/session` sau khi nhập đúng PIN; xem `README.md` mục "Dashboard Share Links" và `api/Endpoints/ShareEndpoints.cs` cho toàn bộ 4 route viewer). Cùng CSP sandbox headers như route owner ở trên. Dashboard payload viewer (`GET /api/share/{token}/dashboard`) giờ có thêm field `kind` và `has_page` để shell biết render iframe custom hay grid widget. Token không hợp lệ/hết hạn/thu hồi, hoặc chưa có phiên hợp lệ → `404` trần (không phân biệt lý do, tránh existence oracle).
 
 ## OAuth 2.1 cho MCP
 

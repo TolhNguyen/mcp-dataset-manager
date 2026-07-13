@@ -177,9 +177,16 @@ public static class DashboardEndpoints
                 principal, userId.Value, req.DatasetId, req.SchemaToken, datasetService, dataSource, ct);
             if (gateError is not null) return gateError;
 
+            // dashboard_kind only governs which kind gets CREATED when dashboard_name doesn't
+            // exist yet; attaching a widget to an existing dashboard ignores it (both kinds hold
+            // widgets — an endpoint IS a widget).
+            var dashboardKind = string.IsNullOrWhiteSpace(req.DashboardKind) ? DashboardGuard.KindGrid : req.DashboardKind.Trim();
+            if (!DashboardGuard.IsValidKind(dashboardKind))
+                return Results.BadRequest(new { success = false, error = new { code = ErrorCodes.ValidationError, message = $"dashboard_kind must be '{DashboardGuard.KindGrid}' or '{DashboardGuard.KindCustom}'." } });
+
             var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
 
-            var ensured = await dashboardService.EnsureDashboardByNameAsync(userId.Value, req.DashboardName, source, actor, ct);
+            var ensured = await dashboardService.EnsureDashboardByNameAsync(userId.Value, req.DashboardName, dashboardKind, source, actor, ct);
             if (!ensured.Success)
             {
                 return MapWriteResult(ensured);
@@ -198,6 +205,46 @@ public static class DashboardEndpoints
             return MapWriteResult(result);
         })
         .RequireAuthorization("KnowledgeWrite");
+
+        // ============================================================
+        // Custom page (kind='custom')
+        // ============================================================
+
+        // MCP: upsert trang HTML theo dashboard_name (tự tạo dashboard kind='custom' nếu chưa có).
+        // KnowledgeWrite = JWT + user-PAT — chính là "owner"; không còn dataset-scoped key.
+        app.MapPut("/api/dashboards/page", async (
+            SetPageByNameRequest req,
+            ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+
+            var (source, actor) = ResolveSourceAndActor(principal, userId.Value);
+
+            var result = await dashboardService.SetPageByNameAsync(
+                userId.Value, req.DashboardName, req.Html, source, actor, ct);
+            return MapWriteResult(result);
+        })
+        .RequireAuthorization("KnowledgeWrite");
+
+        // Iframe src cho shell owner (dashboards.html). Xác thực bằng JWT cookie edm_token —
+        // JwtBearer OnMessageReceived đã đọc cookie khi không có Authorization header, và
+        // same-origin subframe navigation gửi kèm cookie SameSite=Lax. Response tự sandbox
+        // qua DashboardPageHeaders (xem doc ở đó) nên mở trực tiếp URL này cũng vô hại.
+        app.MapGet("/api/dashboards/{id:guid}/page/raw", async (
+            Guid id, HttpContext ctx,
+            ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
+        {
+            var userId = principal.GetUserId();
+            if (userId is null) return Results.Unauthorized();
+
+            var html = await dashboardService.GetPageHtmlAsync(userId.Value, id, ct);
+            if (html is null) return Results.NotFound();
+
+            DashboardPageHeaders.Apply(ctx);
+            return Results.Text(html, "text/html", System.Text.Encoding.UTF8);
+        })
+        .RequireAuthorization("JwtOnly");
     }
 
     // ============================================================
@@ -276,6 +323,7 @@ public static class DashboardEndpoints
             ErrorCodes.ValidationError => Results.BadRequest(new { success = false, error = result.Error }),
             ErrorCodes.DashboardLimitReached => Results.BadRequest(new { success = false, error = result.Error }),
             ErrorCodes.WidgetLimitReached => Results.BadRequest(new { success = false, error = result.Error }),
+            ErrorCodes.DashboardKindMismatch => Results.BadRequest(new { success = false, error = result.Error }),
             _ => Results.BadRequest(new { success = false, error = result.Error })
         };
     }

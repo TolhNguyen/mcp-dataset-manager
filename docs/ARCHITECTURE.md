@@ -205,6 +205,15 @@ connections (encrypted_config AES-GCM) ──> IExternalDbConnector
 - **Validate 2 lần**: lúc lưu (`ValidateByDialect` + trial `LIMIT 1`) và lúc mỗi lần thực thi (re-validate row đọc từ DB — chống sửa tay). Browser chỉ gọi `.../data` (không gửi SQL).
 - `GetWidgetDataAsync`: ownership → cache key `widget:{id}:{updated_at.Ticks}` (edit tự bust) → `IMemoryCache` TTL = refresh interval → execute qua DuckDb/External service với row cap 1000 → trả compact_table. **Bypass token budget** qua `QueryOptions.BypassAiBudget` (chỉ set được trong C#, có `[JsonIgnore]` nên không bind từ body — bảo vệ token budget cho các caller AI thường).
 
+### Custom page (kind='custom') — dashboard realtime HTML tự do
+
+- `dashboards.kind` (`grid` mặc định | `custom`) + `dashboard_pages` (1 trang HTML/dashboard, cap 2MB — `DashboardPageGuard`). Migration `0009`.
+- HTML do AI dựng KHÔNG BAO GIỜ chạy same-origin: mọi route serve nó (`GET /api/dashboards/{id}/page/raw` owner JWT, `GET /api/share/{token}/page` share-session) đặt `Content-Security-Policy: sandbox allow-scripts` + `connect-src 'none'` (`DashboardPageHeaders`) — document tự sandbox thành opaque origin kể cả khi mở URL trực tiếp (top-level, ngoài iframe). Shell (`dashboards.html`/`share.html`) KHÔNG đặt sandbox attribute trên thẻ iframe (attribute chặn cookie phiên ngay từ request nạp iframe).
+- Data bơm một chiều qua postMessage (`js/page-embed.js`): iframe→shell `edm:ready`, shell→iframe `edm:data {endpoints:[{id,title,columns,rows,error?}]}`; owner refresh theo `refresh_interval_sec` từng widget, share viewer cố định 60s. Trong iframe không fetch được gì (`connect-src 'none'`); thư viện chart chỉ load được từ `cdnjs.cloudflare.com`.
+- `PUT /api/dashboards/page` (KnowledgeWrite = JWT/PAT owner) upsert theo `dashboard_name`, tự tạo dashboard `kind='custom'` nếu tên chưa tồn tại; tên đã tồn tại và là `kind='grid'` → `DASHBOARD_KIND_MISMATCH`, KHÔNG BAO GIỜ tự đổi kind. Đây là route duy nhất enforce kind cứng theo hướng "không cho dùng sai kind" — khác với `POST /api/dashboards/widgets` (tạo widget theo `dashboard_name`, có field `dashboard_kind` tuỳ chọn, mặc định `grid`, từ bản vá Task 8): field đó **chỉ** chi phối kind của dashboard **mới tạo** khi tên chưa tồn tại; nếu dashboard tên đó đã tồn tại (bất kể `grid` hay `custom`) thì widget vẫn được gắn bình thường, bỏ qua `dashboard_kind` — một endpoint (widget) hợp lệ ở cả 2 loại dashboard. Endpoint `dashboard_widgets` bản thân không đổi gì (validate 2 lần, cache, row cap như cũ). Share viewer vẫn không bao giờ thấy SQL.
+- MCP: tool `set_dashboard_html` (contract postMessage nằm trong description) gọi `PUT /api/dashboards/page`; `create_dashboard_widget` nhận thêm `dashboard_kind` tuỳ chọn (chỉ ảnh hưởng lúc tạo dashboard mới, xem bullet trên). Query guide có cây quyết định SNAPSHOT (artifact trong chat) / REALTIME (endpoint + trang HTML) + visual-first.
+- Vận hành: tools.md production và `storage/query-guide.md` (nếu có override) phải sync thủ công khi deploy bản này.
+
 ## OAuth 2.1 cho MCP (Phase 0b)
 
 - `oauth_clients` + `oauth_authorization_codes` (hash, single-use, TTL 5 phút, PKCE S256 bắt buộc).

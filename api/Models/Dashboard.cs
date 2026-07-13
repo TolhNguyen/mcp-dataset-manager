@@ -1,7 +1,7 @@
 namespace ExcelDatasetManager.Api.Models;
 
 public record Dashboard(
-    Guid Id, Guid UserId, string Name, string? Description, string CreatedBy,
+    Guid Id, Guid UserId, string Name, string? Description, string Kind, string CreatedBy,
     DateTime CreatedAt, DateTime UpdatedAt);
 
 public record DashboardWidget(
@@ -17,4 +17,7 @@ public record CreateDashboardRequest(string? Name, string? Description);
 // MCP convenience: create a widget, auto-creating the dashboard by name if needed.
 public record CreateWidgetByDashboardNameRequest(string? DashboardName, Guid? DatasetId, string? Title,
     string? Sql, string? ChartType, System.Text.Json.JsonElement? ChartConfig, int? RefreshIntervalSec,
-    string? SchemaToken = null);
+    string? SchemaToken = null, string? DashboardKind = null);
+
+// MCP convenience: upsert trang HTML custom, addressing dashboard theo tên (tự tạo kind='custom').
+public record SetPageByNameRequest(string? DashboardName, string? Html);

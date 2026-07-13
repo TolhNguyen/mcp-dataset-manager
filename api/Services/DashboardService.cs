@@ -33,7 +33,7 @@ public class DashboardService(
 {
     private const string SelectDashboardSql = """
         SELECT id AS Id, user_id AS UserId, name AS Name, description AS Description,
-               created_by AS CreatedBy, created_at AS CreatedAt, updated_at AS UpdatedAt
+               kind AS Kind, created_by AS CreatedBy, created_at AS CreatedAt, updated_at AS UpdatedAt
         FROM dashboards
         """;
 
@@ -65,29 +65,41 @@ public class DashboardService(
 
     public Task<ApiResult<object>> CreateDashboardAsync(
         Guid userId, string? name, string? description, string source, string createdBy, CancellationToken ct)
-        => CreateOrEnsureDashboardAsync(userId, name, description, source, createdBy, allowExisting: false, ct);
+        => WrapEnsure(EnsureDashboardCoreAsync(userId, name, description, source, createdBy,
+            allowExisting: false, DashboardGuard.KindGrid, enforceKindOnExisting: true, ct));
 
     /// <summary>Returns the existing dashboard by (user, name) if one exists, else creates it
     /// (respecting the per-user cap). Used by the MCP convenience tool so an agent can address a
-    /// dashboard by name without first checking whether it exists.</summary>
+    /// dashboard by name without first checking whether it exists. <paramref name="kind"/> only
+    /// governs CREATION when the dashboard doesn't exist yet: widgets are legitimate in both
+    /// kinds (an endpoint IS a widget), so an existing dashboard is returned whatever its kind.</summary>
     public Task<ApiResult<object>> EnsureDashboardByNameAsync(
-        Guid userId, string? name, string source, string createdBy, CancellationToken ct)
-        => CreateOrEnsureDashboardAsync(userId, name, null, source, createdBy, allowExisting: true, ct);
+        Guid userId, string? name, string kind, string source, string createdBy, CancellationToken ct)
+        => WrapEnsure(EnsureDashboardCoreAsync(userId, name, null, source, createdBy,
+            allowExisting: true, kind, enforceKindOnExisting: false, ct));
 
-    private async Task<ApiResult<object>> CreateOrEnsureDashboardAsync(
-        Guid userId, string? name, string? description, string source, string createdBy, bool allowExisting,
-        CancellationToken ct)
+    private static async Task<ApiResult<object>> WrapEnsure(Task<(Dashboard? Dashboard, ApiResult<object>? Error)> task)
+    {
+        var (dashboard, error) = await task;
+        return error ?? ApiResult<object>.Ok(BuildDashboardDto(dashboard!));
+    }
+
+    /// <summary>Core ensure/create trả record thật (không phải DTO) để các caller nội bộ —
+    /// SetPageByNameAsync (Task 3) — dùng tiếp dashboard.Id/Kind mà không phải đọc dynamic.</summary>
+    private async Task<(Dashboard? Dashboard, ApiResult<object>? Error)> EnsureDashboardCoreAsync(
+        Guid userId, string? name, string? description, string source, string createdBy,
+        bool allowExisting, string kind, bool enforceKindOnExisting, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(name))
         {
-            return ApiResult<object>.Fail(ErrorCodes.ValidationError, "name is required.");
+            return (null, ApiResult<object>.Fail(ErrorCodes.ValidationError, "name is required."));
         }
 
         var trimmedName = name.Trim();
         if (trimmedName.Length > DashboardGuard.MaxTitleChars)
         {
-            return ApiResult<object>.Fail(
-                ErrorCodes.ValidationError, $"name must be at most {DashboardGuard.MaxTitleChars} characters.");
+            return (null, ApiResult<object>.Fail(
+                ErrorCodes.ValidationError, $"name must be at most {DashboardGuard.MaxTitleChars} characters."));
         }
 
         await using var conn = await dataSource.OpenConnectionAsync(ct);
@@ -108,8 +120,19 @@ public class DashboardService(
 
             if (existing is not null)
             {
+                // Widgets are legitimate in both kinds (an endpoint IS a widget) — only the HTML
+                // page is kind-specific. Callers that merely attach widgets pass
+                // enforceKindOnExisting: false and accept the existing dashboard whatever its kind.
+                if (enforceKindOnExisting && !string.Equals(existing.Kind, kind, StringComparison.Ordinal))
+                {
+                    await tx.RollbackAsync(ct);
+                    return (null, ApiResult<object>.Fail(
+                        ErrorCodes.DashboardKindMismatch,
+                        $"Dashboard '{existing.Name}' đã tồn tại với kind '{existing.Kind}' — không thể dùng làm dashboard '{kind}'. Chọn tên khác.",
+                        new { dashboard_id = existing.Id, kind = existing.Kind }));
+                }
                 await tx.CommitAsync(ct);
-                return ApiResult<object>.Ok(BuildDashboardDto(existing));
+                return (existing, null);
             }
         }
 
@@ -119,20 +142,21 @@ public class DashboardService(
         if (count >= DashboardGuard.MaxDashboardsPerUser)
         {
             await tx.RollbackAsync(ct);
-            return ApiResult<object>.Fail(
+            return (null, ApiResult<object>.Fail(
                 ErrorCodes.DashboardLimitReached,
                 $"You have reached the {DashboardGuard.MaxDashboardsPerUser}-dashboard limit.",
-                new { max_dashboards = DashboardGuard.MaxDashboardsPerUser, current_count = count });
+                new { max_dashboards = DashboardGuard.MaxDashboardsPerUser, current_count = count }));
         }
 
         var dashboardId = Guid.NewGuid();
 
         await conn.ExecuteAsync("""
-            INSERT INTO dashboards (id, user_id, name, description, created_by)
-            VALUES (@Id, @UserId, @Name, @Description, @CreatedBy)
+            INSERT INTO dashboards (id, user_id, name, description, kind, created_by)
+            VALUES (@Id, @UserId, @Name, @Description, @Kind, @CreatedBy)
             """, new
         {
-            Id = dashboardId, UserId = userId, Name = trimmedName, Description = description, CreatedBy = createdBy
+            Id = dashboardId, UserId = userId, Name = trimmedName, Description = description,
+            Kind = kind, CreatedBy = createdBy
         }, tx);
 
         var created = await conn.QuerySingleAsync<Dashboard>(
@@ -140,7 +164,7 @@ public class DashboardService(
 
         await tx.CommitAsync(ct);
 
-        return ApiResult<object>.Ok(BuildDashboardDto(created));
+        return (created, null);
     }
 
     public async Task<ApiResult<object>> ListDashboardsAsync(Guid userId, CancellationToken ct)
@@ -438,6 +462,81 @@ public class DashboardService(
     }
 
     // ============================================================
+    // Custom page (kind='custom'): trang HTML do AI dựng, serve qua route CSP-sandbox
+    // ============================================================
+
+    /// <summary>
+    /// Upsert trang HTML cho dashboard kind='custom', addressing theo tên (convention giống
+    /// EnsureDashboardByNameAsync để agent không cần lookup trước). Dashboard cùng tên nhưng
+    /// kind='grid' bị từ chối (DASHBOARD_KIND_MISMATCH) — không bao giờ tự đổi kind.
+    /// KHÔNG sanitize html: ranh giới an ninh là CSP sandbox lúc serve, không phải lúc lưu.
+    /// </summary>
+    public async Task<ApiResult<object>> SetPageByNameAsync(
+        Guid userId, string? dashboardName, string? html, string source, string createdBy, CancellationToken ct)
+    {
+        var htmlError = DashboardPageGuard.ValidateHtml(html);
+        if (htmlError is not null)
+        {
+            return ApiResult<object>.Fail(ErrorCodes.ValidationError, htmlError);
+        }
+
+        var (dashboard, error) = await EnsureDashboardCoreAsync(
+            userId, dashboardName, null, source, createdBy,
+            allowExisting: true, DashboardGuard.KindCustom, enforceKindOnExisting: true, ct);
+        if (error is not null) return error;
+
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+
+        await conn.ExecuteAsync("""
+            INSERT INTO dashboard_pages (dashboard_id, html, created_by)
+            VALUES (@DashboardId, @Html, @CreatedBy)
+            ON CONFLICT (dashboard_id) DO UPDATE
+            SET html = EXCLUDED.html, created_by = EXCLUDED.created_by, updated_at = NOW()
+            """, new { DashboardId = dashboard!.Id, Html = html, CreatedBy = createdBy });
+
+        var endpoints = (await conn.QueryAsync<(Guid WidgetId, string Title)>("""
+            SELECT id AS WidgetId, title AS Title
+            FROM dashboard_widgets
+            WHERE dashboard_id = @DashboardId AND archived_at IS NULL
+            ORDER BY position, created_at
+            """, new { DashboardId = dashboard.Id })).ToList();
+
+        var updatedAt = await conn.ExecuteScalarAsync<DateTime>(
+            "SELECT updated_at FROM dashboard_pages WHERE dashboard_id = @Id", new { Id = dashboard.Id });
+
+        // Oauth:PublicUrl là issuer công khai (production: https) — dùng làm base cho view link
+        // trả về agent, vì agent/user mở link ngoài origin của API nội bộ.
+        var baseUrl = (configuration["Oauth:PublicUrl"] ?? "").TrimEnd('/');
+
+        return ApiResult<object>.Ok(new
+        {
+            dashboard_id = dashboard.Id,
+            name = dashboard.Name,
+            kind = dashboard.Kind,
+            view_url = $"{baseUrl}/dashboards.html?id={dashboard.Id}",
+            endpoints = endpoints.Select(e => new { widget_id = e.WidgetId, title = e.Title }).ToList(),
+            html_bytes = System.Text.Encoding.UTF8.GetByteCount(html!),
+            updated_at = updatedAt
+        });
+    }
+
+    /// <summary>
+    /// HTML trang custom, scoped theo ownership (join dashboards.user_id). Trả null khi không có
+    /// page hoặc dashboard không thuộc user — caller trả 404, không phân biệt 2 trường hợp
+    /// (tránh existence oracle). Share route gọi với share.UserId (chủ share) nên cùng path này.
+    /// </summary>
+    public async Task<string?> GetPageHtmlAsync(Guid userId, Guid dashboardId, CancellationToken ct)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        return await conn.ExecuteScalarAsync<string?>("""
+            SELECT p.html
+            FROM dashboard_pages p
+            JOIN dashboards d ON d.id = p.dashboard_id
+            WHERE d.id = @DashboardId AND d.user_id = @UserId
+            """, new { DashboardId = dashboardId, UserId = userId });
+    }
+
+    // ============================================================
     // Widget data execution (frozen SQL re-validated + row-capped + cached)
     // ============================================================
 
@@ -536,13 +635,17 @@ public class DashboardService(
     public async Task<ApiResult<object>> GetShareViewAsync(Guid userId, Guid dashboardId, CancellationToken ct)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
-        var name = await conn.ExecuteScalarAsync<string?>(
-            "SELECT name FROM dashboards WHERE id = @Id AND user_id = @UserId",
+        var dashboard = await conn.QuerySingleOrDefaultAsync<Dashboard>(
+            SelectDashboardSql + " WHERE id = @Id AND user_id = @UserId",
             new { Id = dashboardId, UserId = userId });
-        if (name is null)
+        if (dashboard is null)
         {
             return ApiResult<object>.Fail(ErrorCodes.DashboardNotFound, "Dashboard not found.");
         }
+
+        var hasPage = await conn.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM dashboard_pages WHERE dashboard_id = @Id",
+            new { Id = dashboardId }) > 0;
 
         var widgets = (await conn.QueryAsync<ShareWidgetRow>("""
             SELECT w.id AS WidgetId, w.title AS Title, w.chart_type AS ChartType,
@@ -554,7 +657,9 @@ public class DashboardService(
 
         return ApiResult<object>.Ok(new
         {
-            dashboard_name = name,
+            dashboard_name = dashboard.Name,
+            kind = dashboard.Kind,
+            has_page = hasPage,
             widgets = widgets.Select(w => new
             {
                 widget_id = w.WidgetId,
@@ -592,6 +697,7 @@ public class DashboardService(
         dashboard_id = d.Id,
         name = d.Name,
         description = d.Description,
+        kind = d.Kind,
         created_by = d.CreatedBy,
         created_at = d.CreatedAt,
         updated_at = d.UpdatedAt

@@ -42,6 +42,22 @@
         </header>
 
         <div id="widgetGrid" class="widget-grid"></div>
+
+        <!-- Dashboard kind='custom': iframe view (Xem) + read-only Endpoints tab (xem SQL, chạy
+             thử). Hidden by default; shown/hidden by selectDashboard()/showCustomDashboard() based
+             on dashboard.kind. Lives inside #detailCard so the shared title/description/share
+             button stay in place for both dashboard kinds. -->
+        <div id="customDash" hidden>
+            <div class="card-head">
+                <div>
+                    <button type="button" class="btn-link" id="tabViewBtn">Xem</button>
+                    <button type="button" class="btn-link" id="tabEndpointsBtn">Endpoints</button>
+                </div>
+            </div>
+            <div id="customWarning" class="status-msg error" hidden></div>
+            <div id="customView"></div>
+            <div id="customEndpoints" hidden></div>
+        </div>
     </section>
 
     <!-- Share management panel: list active share links, create a new one (shows share_url + pin
@@ -168,7 +184,9 @@
 <script src="/js/chart.umd.min.js?v=20260710-share"></script>
 <!-- Chart render pipeline shared with share.js — must load before dashboards.js. -->
 <script src="/js/chart-render.js?v=20260710-share"></script>
-<script src="/js/dashboards.js?v=20260710-share"></script>
+<!-- Shell pump for dashboard kind='custom' (iframe sandbox + postMessage data injection). -->
+<script src="/js/page-embed.js?v=20260713-navguard2"></script>
+<script src="/js/dashboards.js?v=20260713-deeplink"></script>
 <script>
     DashboardsPage.init();
 </script>

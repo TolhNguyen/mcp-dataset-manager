@@ -117,4 +117,25 @@ public class DashboardGuardTests
     {
         Assert.Equal(120, DashboardGuard.ClampRefresh(120));
     }
+
+    // ---------- Kind constants ----------
+
+    [Fact]
+    public void Kind_constants_are_grid_and_custom()
+    {
+        Assert.Equal("grid", DashboardGuard.KindGrid);
+        Assert.Equal("custom", DashboardGuard.KindCustom);
+    }
+
+    // ---------- IsValidKind ----------
+
+    [Theory]
+    [InlineData("grid", true)]
+    [InlineData("custom", true)]
+    [InlineData("Grid", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    [InlineData("case", false)]
+    public void IsValidKind_accepts_only_exact_kinds(string? kind, bool expected)
+        => Assert.Equal(expected, DashboardGuard.IsValidKind(kind));
 }

@@ -8,7 +8,8 @@
 // ShareEndpoints.cs / DashboardService.GetShareViewAsync / GetWidgetDataAsync):
 //   POST /api/share/{token}/session        -> 204 + Set-Cookie | 401 {success:false,error:{code:"SHARE_PIN_INVALID",...}}
 //                                              | 429 {success:false,error:{code:"SHARE_LOCKED",message:"...minutes..."}}
-//   GET  /api/share/{token}/dashboard      -> 404 (no/expired/revoked session) | {success:true,data:{dashboard_name, widgets:[{widget_id,title,chart_type,chart_config,position}]}}
+//   GET  /api/share/{token}/dashboard      -> 404 (no/expired/revoked session) | {success:true,data:{dashboard_name, kind, has_page, widgets:[{widget_id,title,chart_type,chart_config,position}]}}
+//   GET  /api/share/{token}/page           -> HTML (CSP sandbox, same-origin, requires session cookie) | bare 404 without session — dashboard kind='custom' only
 //   GET  /api/share/{token}/widgets/{id}/data -> {success:true,data:{columns:[{name,type}],rows:[[...]], ...}} (compact_table shape, same as owner side)
 //
 // Widget DTOs here deliberately omit `sql`, `dataset_id`, `source`, `refresh_interval_sec`
@@ -23,6 +24,7 @@ const token = location.pathname.split('/').pop();
 
 const SharePage = {
     charts: {}, // widget_id -> Chart.js instance, destroyed before re-creating
+    pageEmbed: null, // EdmPageEmbed instance của dashboard custom đang mở (destroy trước khi tạo mới)
 
     init() {
         $('#pinForm').addEventListener('submit', (e) => this.submitPin(e));
@@ -86,6 +88,9 @@ const SharePage = {
 
     showGate() {
         this.clearAllCharts();
+        if (this.pageEmbed) { this.pageEmbed.destroy(); this.pageEmbed = null; }
+        $('#customView').hidden = true;
+        $('#customWarning').hidden = true;
         $('#dash').hidden = true;
         $('#pin-gate').hidden = false;
     },
@@ -123,6 +128,16 @@ const SharePage = {
         dash.hidden = false;
         dash.querySelector('h1').textContent = data.dashboard_name || '';
 
+        if (this.pageEmbed) { this.pageEmbed.destroy(); this.pageEmbed = null; }
+
+        if (data.kind === 'custom' && data.has_page) {
+            this.showCustomDashboard(data);
+            return;
+        }
+        $('#customView').hidden = true;
+        $('#customWarning').hidden = true;
+        $('#widgetGrid').hidden = false;
+
         const widgets = data.widgets || [];
         const grid = $('#widgetGrid');
 
@@ -133,6 +148,37 @@ const SharePage = {
 
         grid.innerHTML = widgets.map(w => this.widgetCardHtml(w)).join('');
         widgets.forEach(w => this.loadWidgetData(w));
+    },
+
+    // Dashboard kind='custom': iframe sandbox nạp /api/share/{token}/page (cùng session cookie),
+    // data bơm qua EdmPageEmbed. Share payload không có refresh_interval_sec (viewer không được
+    // biết cấu hình) — refresh cố định 60s/widget ở phía shell.
+    showCustomDashboard(data) {
+        $('#widgetGrid').hidden = true;
+        $('#widgetGrid').innerHTML = '';
+        $('#customWarning').hidden = true; // reset cảnh báo cũ trước khi mount lại (giống dashboards.js)
+        this.clearAllCharts();
+
+        const view = $('#customView');
+        view.hidden = false;
+        view.innerHTML = '';
+
+        this.pageEmbed = EdmPageEmbed.mount({
+            container: view,
+            iframeSrc: `/api/share/${token}/page`,
+            widgets: (data.widgets || []).map(w => ({ widget_id: w.widget_id, title: w.title })),
+            fetchWidgetData: async (wid) => {
+                const res = await fetch(`/api/share/${token}/widgets/${wid}/data`);
+                if (!res.ok) throw new Error('Không tải được dữ liệu widget.');
+                const json = await res.json();
+                return json.data || {};
+            },
+            onWarning: (msg) => {
+                const box = $('#customWarning');
+                box.hidden = false;
+                box.textContent = msg;
+            }
+        });
     },
 
     widgetCardHtml(w) {
