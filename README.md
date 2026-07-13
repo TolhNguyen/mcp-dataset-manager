@@ -455,6 +455,7 @@ Next session, the saved metric definition appears in context and the dashboard r
 | `upload_dataset`, `get_dataset`, `delete_dataset` | Dataset lifecycle. |
 | `get_dataset_knowledge`, `save_dataset_knowledge`, `update_dataset_knowledge`, `search_knowledge` | Read and maintain dataset memory (writes honor the per-dataset AI write toggle). |
 | `create_dashboard_widget`, `list_dashboards`, `get_dashboard`, `update_dashboard_widget` | Build and manage live dashboards (SQL writes require `schema_token`). |
+| `set_dashboard_html` | Set a custom HTML page for a realtime dashboard (`kind='custom'`); data flows in via `postMessage`, and the response returns `view_url`. |
 | `share_dashboard`, `list_dashboard_shares`, `revoke_dashboard_share` | Mint, inspect, and revoke PIN-protected viewer links for a dashboard. |
 | `export_dashboard` | Produce a self-contained snapshot HTML file (optionally PIN-encrypted) via a one-time download URL. |
 
