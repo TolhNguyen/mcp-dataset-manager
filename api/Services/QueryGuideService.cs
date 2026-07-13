@@ -122,10 +122,15 @@ public class QueryGuideService
         When the user asks for a "dashboard" or "report", FIRST decide (ask ONE question if unclear):
         - SNAPSHOT (one-off, frozen data): query the data, then build an HTML artifact in chat with
           the data embedded. Do NOT call dashboard tools.
-        - REALTIME (data must be fresh every time it is opened): create one endpoint per query with
-          create_dashboard_widget (same dashboard_name, dashboard_kind:'custom'), then build the page and call
-          set_dashboard_html (its description contains the REQUIRED postMessage contract), and give
-          the user the returned view_url.
+        - REALTIME (data must be fresh every time it is opened): design the DATA POOL first —
+          which tables of data does the dashboard need (detailed enough for every planned
+          filter)? One DATA endpoint per table via create_dashboard_widget (same dashboard_name,
+          dashboard_kind:'custom', cap 5000 rows each). Then build the page free-form from the
+          pool (an endpoint is NOT one chart: one endpoint can feed many charts, several
+          endpoints can merge into one; filters run client-side on the pumped data; the page may
+          request a reload via edm:refresh) and call set_dashboard_html (its description contains
+          the REQUIRED postMessage contract). Give the user the returned view_url. Missing data
+          later -> add endpoints, then update the HTML.
         Always visual-first for both kinds: prefer charts and KPI tiles over raw tables, with
         artifact-quality layout. Only the dashboard owner (or Claude via their PAT) can edit
         endpoint SQL; share viewers can never see SQL.
