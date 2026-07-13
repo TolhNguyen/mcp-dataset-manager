@@ -7,13 +7,16 @@ using Npgsql;
 namespace ExcelDatasetManager.Api.Endpoints;
 
 /// <summary>
-/// HTTP surface for dashboards + widgets. Mirrors the ownership + scoped-key checks used by
-/// <see cref="KnowledgeEndpoints"/>: ownership itself is enforced inside
-/// <see cref="DashboardService"/> (every query is scoped by user_id), while a dataset-scoped API
-/// key is additionally restricted here so it can only create/update widgets against the one
-/// dataset it was minted for. The widget "data" route is JwtOnly (browser-only reads) and rate
-/// limited — the browser never sends SQL, only dashboard_id/widget_id, so there is nothing for a
-/// scoped key to abuse there in the first place.
+/// HTTP surface for dashboards + widgets. Ownership is enforced inside
+/// <see cref="DashboardService"/> (every query is scoped by user_id) — API keys (PATs) are
+/// user-scoped, not dataset-scoped (that model was removed), so a PAT can only ever read/write
+/// its own user's dashboards, same as a JWT for that user. List/get dashboard use policy
+/// "QueryAccess" (JWT or ApiKey) so MCP tools (list_dashboards, get_dashboard) can call them via
+/// PAT. The remaining routes — dashboard delete, widget hard-delete, widget "data", and
+/// "/page/raw" — stay JwtOnly: they are either destructive/mutating actions we don't want a
+/// leaked PAT to trigger, or (for widget "data") browser-only reads that are also rate limited,
+/// where the browser never sends SQL, only dashboard_id/widget_id, so there is nothing for an
+/// API key to abuse there in the first place.
 /// </summary>
 public static class DashboardEndpoints
 {
@@ -37,6 +40,8 @@ public static class DashboardEndpoints
         })
         .RequireAuthorization("JwtOnly");
 
+        // PAT-accessible: MCP tool list_dashboards reads via PAT; ownership is still enforced by
+        // user_id scoping in DashboardService (a PAT is user-scoped, so it only ever sees its own).
         app.MapGet("/api/dashboards", async (
             ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
         {
@@ -46,8 +51,10 @@ public static class DashboardEndpoints
             var result = await dashboardService.ListDashboardsAsync(userId.Value, ct);
             return Results.Ok(new { success = true, data = result.Data });
         })
-        .RequireAuthorization("JwtOnly");
+        .RequireAuthorization("QueryAccess");
 
+        // PAT-accessible: MCP tool get_dashboard reads via PAT (e.g. to review a widget's frozen
+        // SQL); ownership is still enforced by user_id scoping in DashboardService.
         app.MapGet("/api/dashboards/{id:guid}", async (
             Guid id,
             ClaimsPrincipal principal, DashboardService dashboardService, CancellationToken ct) =>
@@ -58,7 +65,7 @@ public static class DashboardEndpoints
             var result = await dashboardService.GetDashboardAsync(userId.Value, id, ct);
             return MapWriteResult(result);
         })
-        .RequireAuthorization("JwtOnly");
+        .RequireAuthorization("QueryAccess");
 
         app.MapDelete("/api/dashboards/{id:guid}", async (
             Guid id,

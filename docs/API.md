@@ -372,7 +372,8 @@ Mỗi dataset → schema DuckDB theo `alias`. Tối đa `Query:MaxDatasetsPerQue
 
 ## Dashboards
 
-### POST/GET `/api/dashboards` · GET/DELETE `/api/dashboards/{id}` — `JwtOnly`
+### POST `/api/dashboards` · DELETE `/api/dashboards/{id}` — `JwtOnly`
+### GET `/api/dashboards` · GET `/api/dashboards/{id}` — `QueryAccess` (JWT hoặc PAT — MCP `list_dashboards`/`get_dashboard`)
 GET `{id}` trả dashboard + widget active. Tối đa 10 dashboard/user. Dashboard DTO có thêm field `kind` (`grid` mặc định | `custom`).
 
 ### POST `/api/dashboards/{id}/widgets` — `KnowledgeWrite`
