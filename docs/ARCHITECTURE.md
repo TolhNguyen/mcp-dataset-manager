@@ -203,7 +203,7 @@ connections (encrypted_config AES-GCM) ──> IExternalDbConnector
 
 - `dashboards` + `dashboard_widgets` (sql đóng băng, chart_type/config, refresh_interval_sec, source, archived_at).
 - **Validate 2 lần**: lúc lưu (`ValidateByDialect` + trial `LIMIT 1`) và lúc mỗi lần thực thi (re-validate row đọc từ DB — chống sửa tay). Browser chỉ gọi `.../data` (không gửi SQL).
-- `GetWidgetDataAsync`: ownership → cache key `widget:{id}:{updated_at.Ticks}` (edit tự bust) → `IMemoryCache` TTL = refresh interval → execute qua DuckDb/External service với row cap 1000 → trả compact_table. **Bypass token budget** qua `QueryOptions.BypassAiBudget` (chỉ set được trong C#, có `[JsonIgnore]` nên không bind từ body — bảo vệ token budget cho các caller AI thường).
+- `GetWidgetDataAsync`: ownership → cache key `widget:{id}:{updated_at.Ticks}` (edit tự bust) → `IMemoryCache` TTL = refresh interval → execute qua DuckDb/External service với row cap 5000 (`Dashboard:MaxRowsPerWidget`) → trả compact_table. **Bypass token budget** qua `QueryOptions.BypassAiBudget` (chỉ set được trong C#, có `[JsonIgnore]` nên không bind từ body — bảo vệ token budget cho các caller AI thường).
 
 ### Custom page (kind='custom') — dashboard realtime HTML tự do
 
@@ -212,6 +212,7 @@ connections (encrypted_config AES-GCM) ──> IExternalDbConnector
 - Data bơm một chiều qua postMessage (`js/page-embed.js`): iframe→shell `edm:ready`, shell→iframe `edm:data {endpoints:[{id,title,columns,rows,error?}]}`; owner refresh theo `refresh_interval_sec` từng widget, share viewer cố định 60s. Trong iframe không fetch được gì (`connect-src 'none'`); thư viện chart chỉ load được từ `cdnjs.cloudflare.com`.
 - `PUT /api/dashboards/page` (KnowledgeWrite = JWT/PAT owner) upsert theo `dashboard_name`, tự tạo dashboard `kind='custom'` nếu tên chưa tồn tại; tên đã tồn tại và là `kind='grid'` → `DASHBOARD_KIND_MISMATCH`, KHÔNG BAO GIỜ tự đổi kind. Đây là route duy nhất enforce kind cứng theo hướng "không cho dùng sai kind" — khác với `POST /api/dashboards/widgets` (tạo widget theo `dashboard_name`, có field `dashboard_kind` tuỳ chọn, mặc định `grid`, từ bản vá Task 8): field đó **chỉ** chi phối kind của dashboard **mới tạo** khi tên chưa tồn tại; nếu dashboard tên đó đã tồn tại (bất kể `grid` hay `custom`) thì widget vẫn được gắn bình thường, bỏ qua `dashboard_kind` — một endpoint (widget) hợp lệ ở cả 2 loại dashboard. Endpoint `dashboard_widgets` bản thân không đổi gì (validate 2 lần, cache, row cap như cũ). Share viewer vẫn không bao giờ thấy SQL.
 - MCP: tool `set_dashboard_html` (contract postMessage nằm trong description) gọi `PUT /api/dashboards/page`; `create_dashboard_widget` nhận thêm `dashboard_kind` tuỳ chọn (chỉ ảnh hưởng lúc tạo dashboard mới, xem bullet trên). Query guide có cây quyết định SNAPSHOT (artifact trong chat) / REALTIME (endpoint + trang HTML) + visual-first.
+- **Mô hình 2 tầng**: endpoint = nguồn dữ liệu thuần (1 SQL đóng băng → 1 bảng ≤5000 dòng, `chart_type` tuỳ chọn — chỉ là nhãn tab Endpoints); trang HTML vẽ tự do từ pool (1 endpoint nuôi nhiều chart, nhiều endpoint gộp 1 chart, bộ lọc client-side). Trang được xin nạp lại chủ động: iframe→shell `edm:refresh {id?}`, rate-limit 5s/endpoint phía shell, độ tươi vẫn chặn bởi cache TTL server.
 - Vận hành: tools.md production và `storage/query-guide.md` (nếu có override) phải sync thủ công khi deploy bản này.
 
 ## OAuth 2.1 cho MCP (Phase 0b)
@@ -229,7 +230,7 @@ connections (encrypted_config AES-GCM) ──> IExternalDbConnector
 | `Query:MaxDatasetsPerQuery` | 3 | Trần dataset/multi-query |
 | `Query:SafeMaxTokens` / `HardMaxTokens` | 32000 / 512000 | Token budget AI |
 | `ExternalQuery:TimeoutSeconds` / `MaxConcurrentPerConnection` / `MaxTablesPerDataset` | 30 / 3 / 50 | Bảo vệ DB nguồn |
-| `Dashboard:MaxRowsPerWidget` | 1000 | Row cap widget |
+| `Dashboard:MaxRowsPerWidget` | 5000 | Row cap widget |
 | `Proxy:TrustForwardedHeaders` | (compose: true) | Rate-limit theo user thật sau Caddy |
 
 Giới hạn dataset/user: cột `users.max_datasets` (mặc định 10), chỉnh trực tiếp cho từng user.

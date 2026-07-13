@@ -513,15 +513,21 @@ response_hint: |
 type: tool
 name: create_dashboard_widget
 description: |
-  Tạo một endpoint dữ liệu (widget) cho dashboard. Với dashboard REALTIME
-  kind='custom' (xem set_dashboard_html), mỗi endpoint là một câu SQL đóng
-  băng mà trang HTML nhận data qua postMessage. Với dashboard grid thường,
-  widget hiển thị trực tiếp trên web app. SQL phải là SELECT/WITH read-only
-  trên đúng dataset. Nếu dashboard_name chưa tồn tại, server tự tạo dashboard
-  mới với tên đó (kind theo dashboard_kind, mặc định grid) — muốn dashboard
-  custom thì gọi set_dashboard_html (trước hoặc sau đều được, nhưng tên phải
-  nhất quán; nếu tạo widget TRƯỚC cho dashboard realtime, truyền
-  dashboard_kind:'custom').
+  Tạo MỘT ENDPOINT DỮ LIỆU cho dashboard: 1 câu SQL đóng băng → 1 bảng dữ
+  liệu (columns + rows, tối đa 5000 dòng). Endpoint KHÔNG gắn với một chart
+  cụ thể. Với dashboard REALTIME kind='custom', trang HTML
+  (set_dashboard_html) nhận CẢ POOL endpoint qua postMessage và tự do vẽ:
+  một endpoint nuôi nhiều chart, nhiều endpoint gộp một chart, bộ lọc /
+  drill-down làm client-side trên data đã bơm. Hãy thiết kế DATA trước:
+  dashboard cần những BẢNG DỮ LIỆU nào (đủ chiều cho bộ lọc, ví dụ
+  tháng × đơn vị × danh mục), mỗi bảng = 1 endpoint; thiếu data thì tạo
+  thêm endpoint rồi cập nhật HTML. Với dashboard grid thường, widget vẫn
+  hiển thị trực tiếp kiểu 1-widget-1-chart trên web app.
+  SQL phải là SELECT/WITH read-only trên đúng dataset. Nếu dashboard_name
+  chưa tồn tại, server tự tạo (kind theo dashboard_kind, mặc định grid);
+  nếu tạo endpoint TRƯỚC cho dashboard realtime, truyền
+  dashboard_kind:'custom' (hoặc gọi set_dashboard_html trước — cả hai thứ
+  tự đều được, tên phải nhất quán).
 connection: edm
 method: POST
 path: /api/dashboards/widgets
@@ -554,9 +560,8 @@ params:
   chart_type:
     in: body
     type: string
-    required: true
     enum: [table, line, bar, pie, stat]
-    description: How the widget should render its query result.
+    description: "Tuỳ chọn — bỏ trống server mặc định 'table'. Với dashboard custom đây chỉ là nhãn ở tab Endpoints (trang HTML tự quyết cách vẽ); với dashboard grid NÊN gửi vì widget render đúng theo type này."
   chart_config:
     in: body
     type: object
@@ -575,7 +580,8 @@ response_hint: |
   chart_type, chart_config, refresh_interval_sec, position, ...}}. Keep
   widget_id + dashboard_id in case the user wants to change this widget later
   via update_dashboard_widget.
-  Validate SQL with query_dataset first when creating analytical widgets.
+  Validate SQL with query_dataset first. Row cap: 5000/endpoint — cần chi
+  tiết hơn thì tách endpoint.
   error.code=CONTEXT_REQUIRED / SCHEMA_CHANGED means call get_context for this
   dataset and retry with its schema_token.
   error.code=VALIDATION_ERROR means the SQL wasn't accepted as a read-only
@@ -707,12 +713,15 @@ description: |
   1. Xác định loại: SNAPSHOT (xem một lần, data đóng băng → dựng artifact
      ngay trong chat, KHÔNG dùng tool này) hay REALTIME (mở lại thấy data
      mới → dùng tool này). Không rõ thì hỏi người dùng MỘT câu rồi mới làm.
-  2. REALTIME: tạo từng endpoint bằng create_dashboard_widget (mỗi endpoint
-     = 1 câu SQL, cần schema_token), cùng dashboard_name — truyền
-     dashboard_kind:'custom' ở mỗi lần gọi create_dashboard_widget (hoặc gọi
-     set_dashboard_html trước rồi tạo endpoint sau, cả hai thứ tự đều được).
-  3. Dựng trang HTML hoàn chỉnh (visual-first: ưu tiên chart/KPI tile hơn
-     bảng số liệu; chất lượng thiết kế như artifact) rồi gọi tool này.
+  2. REALTIME: thiết kế POOL DATA trước — dashboard cần những bảng dữ liệu
+     nào (đủ chiều cho mọi bộ lọc dự kiến)? Mỗi bảng = 1 endpoint, tạo bằng
+     create_dashboard_widget (cần schema_token), cùng dashboard_name —
+     truyền dashboard_kind:'custom' (hoặc gọi set_dashboard_html trước rồi
+     tạo endpoint sau, cả hai thứ tự đều được).
+  3. Dựng trang HTML hoàn chỉnh VẼ TỰ DO từ pool (KHÔNG bó 1 endpoint = 1
+     chart: một endpoint nuôi nhiều chart, nhiều endpoint gộp một chart;
+     bộ lọc/drill-down chạy client-side trên data đã bơm; visual-first,
+     chất lượng như artifact) rồi gọi tool này.
   4. Gửi view_url trong response cho người dùng.
 
   CONTRACT của trang HTML (bắt buộc — trang chạy trong CSP sandbox, KHÔNG
@@ -726,6 +735,13 @@ description: |
         render(e.data.endpoints);   // hàm bạn tự viết — vẽ lại TOÀN BỘ trang
       });
       parent.postMessage({ type: 'edm:ready' }, '*');
+  - Tuỳ chọn — trang được xin nạp lại data chủ động (nút "Làm mới", sau khi
+    đổi bộ lọc):
+      parent.postMessage({ type: 'edm:refresh' }, '*');                 // tất cả endpoint
+      parent.postMessage({ type: 'edm:refresh', id: '<widget_id>' }, '*'); // một endpoint
+    Shell rate-limit 5 giây/endpoint (xin quá hạn bị bỏ qua im lặng); server
+    còn cache data theo refresh_interval_sec (tối thiểu 30s) nên data mới
+    thật sự chỉ về sau khi cache hết hạn — nút Làm mới hữu ích khi trang mở lâu.
   - endpoints khớp với các widget đã tạo (id = widget_id). Entry có field
     `error` thì hiện trạng thái lỗi cho chart đó, các chart khác vẫn vẽ.
   - render() phải idempotent: được gọi lại mỗi lần data refresh (server tự

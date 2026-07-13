@@ -7,7 +7,9 @@
 // opaque origin ngay từ request nạp iframe nên cookie phiên (edm_token / edm_share_*) sẽ không
 // được gửi và route trả 401/404. Sandbox đến từ response là đủ: trang bị opaque origin sau khi
 // nạp, không đọc được cookie/localStorage, connect-src 'none' chặn mọi fetch từ bên trong.
-// Data chỉ vào trang qua postMessage một chiều từ shell này.
+// Data vào trang qua postMessage từ shell này; chiều ngược lại trang chỉ được gửi 2 loại
+// message: edm:ready (handshake) và edm:refresh (xin nạp lại, rate-limit 5s/endpoint) — không
+// có đường nào khác từ trang ra ngoài.
 
 const EdmPageEmbed = {
     mount(opts) {
@@ -29,6 +31,7 @@ const EdmPageEmbed = {
         let loadCount = 0; // đếm sự kiện `load` của iframe — xem onIframeLoad bên dưới
         const intervals = [];
         const gens = new Map(); // widget_id -> generation, chặn response cũ ghi đè data mới hơn
+        const lastManualRefresh = new Map(); // widget_id -> timestamp lần edm:refresh gần nhất
 
         function post() {
             if (disposed || !iframe.contentWindow) return;
@@ -72,9 +75,31 @@ const EdmPageEmbed = {
             // thật sẽ trượt check này, đóng nốt kẽ hở bypass handshake kiểu navigate-during-parse
             // (điều hướng trước khi sự kiện `load` đầu tiên kịp bắn).
             if (e.origin !== 'null') return;
-            if (!e.data || e.data.type !== 'edm:ready') return;
-            ready = true;
-            post();
+            if (!e.data) return;
+
+            if (e.data.type === 'edm:ready') {
+                ready = true;
+                post();
+                return;
+            }
+
+            if (e.data.type === 'edm:refresh') {
+                // Trang xin nạp lại chủ động (nút "Làm mới" / sau khi đổi bộ lọc). Rate-limit
+                // 5s/endpoint chặn trang lỗi spam vòng lặp — xin quá hạn bị bỏ qua im lặng.
+                // Độ tươi thật vẫn bị chặn bởi cache server (TTL = refresh_interval_sec, min 30s):
+                // refresh trong TTL trả lại data cache, hữu ích chủ yếu khi trang mở lâu.
+                // id không khớp endpoint nào -> targets rỗng -> no-op im lặng.
+                const targets = e.data.id
+                    ? widgets.filter(w => w.widget_id === e.data.id)
+                    : widgets;
+                const now = Date.now();
+                targets.forEach(w => {
+                    const last = lastManualRefresh.get(w.widget_id) || 0;
+                    if (now - last < 5000) return;
+                    lastManualRefresh.set(w.widget_id, now);
+                    refreshWidget(w);
+                });
+            }
         };
         window.addEventListener('message', onMessage);
 
