@@ -1,10 +1,10 @@
+File tools PRODUCTION cho bridge (mount bởi allinone.yaml → /app/tools.md). CHỈ chứa connection EDM + tool EDM — không cần env vars mẫu. QUAN TRỌNG: khi thêm/sửa tool EDM, sửa CẢ file này LẪN tools.example.md (bản example có thêm các connection mẫu Partner/GitHub cho tài liệu).
+
 # Tools Configuration
 
 This file is the single source of truth for what tools the remote MCP bridge exposes to Claude.
 Each fenced ` ```yaml ` block with a `type:` field is a declaration. Free text between
 blocks is documentation for humans and is ignored by the parser.
-
-Bản production thật nằm ở tools.edm.md (EDM-only) — sửa tool EDM thì phải sửa cả hai file.
 
 **Three block kinds:**
 
@@ -14,11 +14,9 @@ Bản production thật nằm ở tools.edm.md (EDM-only) — sửa tool EDM th�
 
 To use this file:
 
-1. Copy it to `tools.md` next to the bridge: `cp tools.example.md tools.md`
-2. Set the server env vars referenced as `${VAR}`. Runtime vars like `${request.user_token}` are resolved from the incoming HTTP request.
-3. Edit the connections + tools to match your environment.
-4. Validate: `node dist/index.js validate ./tools.md`.
-5. Restart the bridge container.
+1. Set the server env vars referenced as `${VAR}`. Runtime vars like `${request.user_token}` are resolved from the incoming HTTP request.
+2. Validate: `node dist/index.js validate ./tools.md`.
+3. Restart the bridge container (or let it hot-reload on file change).
 
 ---
 
@@ -49,53 +47,6 @@ auth:
   value: ${request.user_token}
 default_headers:
   Accept: application/json
-```
-
-## Connection: Partner A (OAuth2 client credentials)
-
-Replace with a real partner API. The bridge fetches a token once and caches it
-until shortly before expiry; on 401 it transparently refreshes once and retries.
-
-```yaml
-type: connection
-id: partner_a
-base_url: https://api.partner-a.example.com
-auth:
-  type: oauth2_client_credentials
-  token_url: https://auth.partner-a.example.com/oauth/token
-  client_id: ${PARTNER_A_CLIENT_ID}
-  client_secret: ${PARTNER_A_CLIENT_SECRET}
-  scope: invoices.read
-  # client_auth: body (default) | basic
-timeout_ms: 45000
-```
-
-## Connection: Partner B (HTTP basic auth)
-
-```yaml
-type: connection
-id: partner_b
-base_url: https://api.partner-b.example.com
-auth:
-  type: basic
-  username: ${PARTNER_B_USER}
-  password: ${PARTNER_B_PASS}
-```
-
-## Connection: GitHub (bearer token)
-
-A worked example for a real public API.
-
-```yaml
-type: connection
-id: github
-base_url: https://api.github.com
-auth:
-  type: bearer
-  token: ${GITHUB_TOKEN:-}
-default_headers:
-  Accept: application/vnd.github+json
-  X-GitHub-Api-Version: "2022-11-28"
 ```
 
 ---
@@ -873,145 +824,4 @@ response_hint: |
   Shape: {success, data: {download_url, expires_in_sec, one_time, encrypted}}.
   Give download_url to the user immediately - it is single-use and expires in
   10 minutes. Remind them of the PIN separately if one was set.
-```
-
----
-
-# Partner tools (reconciliation examples)
-
-The point of having multiple connections in one bridge: Claude can query EDM
-and a partner API in a single conversation and reconcile the two.
-
-## partner_a_invoices
-
-```yaml
-type: tool
-name: partner_a_invoices
-description: |
-  Fetch invoices from Partner A within a date range. Use this to reconcile
-  against the user's internal invoice data on EDM.
-connection: partner_a
-method: GET
-path: /v1/invoices
-params:
-  from:
-    in: query
-    type: string
-    required: true
-    description: Start date inclusive (YYYY-MM-DD).
-  to:
-    in: query
-    type: string
-    required: true
-    description: End date inclusive (YYYY-MM-DD).
-  status:
-    in: query
-    type: string
-    enum: [paid, pending, void]
-    default: paid
-  limit:
-    in: query
-    type: integer
-    default: 200
-response_transform: "$.invoices[*]"
-response_hint: |
-  After transform: an array of invoices, each {id, amount, issued_at, status, ...}.
-  To reconcile with EDM, match invoice.id against the raw_invoices.invoice_id column
-  in the user's EDM dataset (verify the SQL column name via get_dataset_schema).
-```
-
-## partner_a_invoice_detail
-
-```yaml
-type: tool
-name: partner_a_invoice_detail
-description: Fetch one invoice's full detail from Partner A by its id.
-connection: partner_a
-method: GET
-path: /v1/invoices/{invoice_id}
-params:
-  invoice_id:
-    in: path
-    type: string
-    required: true
-```
-
-## partner_b_orders
-
-```yaml
-type: tool
-name: partner_b_orders
-description: |
-  List Partner B orders with optional filters. Used for cross-checking
-  fulfillment data between the user's EDM dataset and Partner B's records.
-connection: partner_b
-method: GET
-path: /orders
-params:
-  from:
-    in: query
-    type: string
-    required: true
-  to:
-    in: query
-    type: string
-    required: true
-  customer_id:
-    in: query
-    type: string
-  tag:
-    in: query
-    type: array
-    items:
-      type: string
-    description: One or more tags; repeated as ?tag=a&tag=b in the URL.
-response_transform: "$.data[*]"
-```
-
----
-
-# Public API examples
-
-These two work out of the box (assuming you have a GitHub token); they're here
-as a sanity check that the bridge is wired up correctly.
-
-## github_search_repos
-
-```yaml
-type: tool
-name: github_search_repos
-description: Search GitHub repositories by keyword. Useful for sanity-testing the bridge.
-connection: github
-method: GET
-path: /search/repositories
-params:
-  q:
-    in: query
-    type: string
-    required: true
-    description: GitHub search query, e.g. "duckdb language:typescript".
-  per_page:
-    in: query
-    type: integer
-    default: 10
-response_transform: "$.items[*]"
-response_hint: |
-  After transform: array of repos with fields like full_name, stargazers_count,
-  description, html_url. Useful for showing the user a short ranked list.
-```
-
-## github_user
-
-```yaml
-type: tool
-name: github_user
-description: Fetch a public GitHub user profile.
-connection: github
-method: GET
-path: /users/{username}
-params:
-  username:
-    in: path
-    type: string
-    required: true
 ```

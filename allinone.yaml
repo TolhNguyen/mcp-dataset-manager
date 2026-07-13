@@ -5,11 +5,9 @@
 # on a server.
 #
 # ── BEFORE FIRST RUN ────────────────────────────────────────────────────────
-# 1. Provide the MCP tools config the bridge loads:
-#        cp mcp-bridge/tools.example.md mcp-bridge/tools.md
-#    then delete the "Partner A / Partner B / GitHub" sample connection+tool
-#    blocks from tools.md (they reference env vars you don't have). Keep the
-#    "EDM" connection and all EDM tools.
+# 1. MCP tools config: tools config đã nằm sẵn trong repo
+#    (mcp-bridge/tools.edm.md) — không cần làm gì; muốn thêm connector ngoài
+#    thì sửa file đó.
 #
 # 2. Set the REQUIRED secrets below — either export them, or put them in a
 #    `.env` file next to this yaml (compose reads it automatically):
@@ -33,6 +31,8 @@
 #   OAuth flow, the user logs in and clicks Allow. No token to paste.
 # • The API can reach external databases running on THIS host via the hostname
 #   `host.docker.internal` (see extra_hosts on the api service).
+# • storage volume: đừng tạo storage/query-guide.md trừ khi muốn ĐÈ query guide
+#   bản trong code — file đó override toàn bộ guide.
 # ============================================================================
 
 services:
@@ -102,7 +102,7 @@ services:
       ExternalQuery__MaxTablesPerDataset: ${EXTERNAL_MAX_TABLES:-50}
 
       # ── Dashboards ───────────────────────────────────────────────────────
-      Dashboard__MaxRowsPerWidget: ${DASHBOARD_MAX_ROWS_PER_WIDGET:-1000}
+      Dashboard__MaxRowsPerWidget: ${DASHBOARD_MAX_ROWS_PER_WIDGET:-5000}
     ports:
       - "127.0.0.1:${API_PORT:-5847}:8080"
     volumes:
@@ -129,8 +129,9 @@ services:
     ports:
       - "127.0.0.1:${MCP_PORT:-5848}:5848"
     volumes:
-      # Run `cp mcp-bridge/tools.example.md mcp-bridge/tools.md` first (see header).
-      - ./mcp-bridge/tools.md:/app/tools.md:ro
+      # tools.edm.md is the committed production tools config (see header) —
+      # mounted straight from the repo; the bridge hot-reloads it on change.
+      - ./mcp-bridge/tools.edm.md:/app/tools.md:ro
 
   caddy:
     image: caddy:2-alpine
