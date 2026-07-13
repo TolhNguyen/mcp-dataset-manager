@@ -680,6 +680,34 @@ code {
     display: block;
 }
 
+/* Share viewer, dashboard kind='custom': full-bleed — iframe chiếm trọn viewport dưới topbar.
+   52px = chiều cao đo được của .topbar (padding 12px trên/dưới + line-height h1 18px*1.5=27px
+   + border-bottom 1px = 52px), không phải hằng số đoán chừng. */
+body.share-custom-full main.container {
+    max-width: none;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+}
+body.share-custom-full #dash {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+}
+body.share-custom-full #dash .card-head {
+    display: none; /* trang HTML custom tự có tiêu đề riêng */
+}
+body.share-custom-full #customView .page-embed-frame {
+    height: calc(100vh - 52px);
+    border-radius: 0;
+}
+body.share-custom-full #customWarning {
+    margin: 8px 12px;
+}
+
 /* Endpoints tab (dashboard kind='custom'): read-only SQL preview for a widget. */
 .endpoint-sql {
     background: #f6f8fa;

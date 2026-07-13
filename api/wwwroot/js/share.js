@@ -93,6 +93,7 @@ const SharePage = {
         $('#customWarning').hidden = true;
         $('#dash').hidden = true;
         $('#pin-gate').hidden = false;
+        document.body.classList.remove('share-custom-full'); // rời trang custom -> bỏ full-bleed
     },
 
     // ============================================================
@@ -137,6 +138,7 @@ const SharePage = {
         $('#customView').hidden = true;
         $('#customWarning').hidden = true;
         $('#widgetGrid').hidden = false;
+        document.body.classList.remove('share-custom-full'); // dashboard dạng grid -> bỏ full-bleed
 
         const widgets = data.widgets || [];
         const grid = $('#widgetGrid');
@@ -158,6 +160,9 @@ const SharePage = {
         $('#widgetGrid').innerHTML = '';
         $('#customWarning').hidden = true; // reset cảnh báo cũ trước khi mount lại (giống dashboards.js)
         this.clearAllCharts();
+        // Full-bleed layout cho trang custom: iframe chiếm trọn viewport dưới topbar,
+        // bỏ khung card/padding của .container — xem style.css (body.share-custom-full).
+        document.body.classList.add('share-custom-full');
 
         const view = $('#customView');
         view.hidden = false;
