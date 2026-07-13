@@ -67,6 +67,11 @@ const EdmPageEmbed = {
         const onMessage = (e) => {
             if (disposed) return;
             if (e.source !== iframe.contentWindow) return;
+            // Tài liệu AI hợp lệ bị sandbox bởi CSP header của response nên origin của nó là
+            // opaque — serialize thành chuỗi literal 'null'. Document đã điều hướng sang origin
+            // thật sẽ trượt check này, đóng nốt kẽ hở bypass handshake kiểu navigate-during-parse
+            // (điều hướng trước khi sự kiện `load` đầu tiên kịp bắn).
+            if (e.origin !== 'null') return;
             if (!e.data || e.data.type !== 'edm:ready') return;
             ready = true;
             post();
