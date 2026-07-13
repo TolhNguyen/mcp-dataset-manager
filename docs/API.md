@@ -381,15 +381,15 @@ GET `{id}` trả dashboard + widget active. Tối đa 10 dashboard/user. Dashboa
 { "dataset_id":"…","title":"…","sql":"SELECT …","chart_type":"bar",
   "chart_config":{…},"refresh_interval_sec":60 }
 ```
-SQL **đóng băng**, validate lúc lưu (theo dialect) + chạy thử `LIMIT 1`. `chart_type` ∈ table|line|bar|pie|stat. `refresh_interval_sec` clamp ≥30. Tối đa 20 widget/dashboard. Dataset-scoped key chỉ tạo widget cho đúng dataset của nó.
+SQL **đóng băng**, validate lúc lưu (theo dialect) + chạy thử `LIMIT 1`. `chart_type` tuỳ chọn (bỏ trống → mặc định `table`; nếu có gửi lên thì vẫn phải ∈ table|line|bar|pie|stat). `refresh_interval_sec` clamp ≥30. Tối đa 20 widget/dashboard. Dataset-scoped key chỉ tạo widget cho đúng dataset của nó.
 
 ### PUT `.../widgets/{wid}` · DELETE `.../widgets/{wid}` (archive) — `KnowledgeWrite`
 ### DELETE `.../widgets/{wid}/hard` — `JwtOnly`
 ### GET `/api/dashboards/{id}/widgets/{wid}/data` — `JwtOnly`, rate-limited
-Chạy lại SQL đã đóng băng (re-validate + row cap `Dashboard:MaxRowsPerWidget` mặc định 1000 + timeout), cache in-memory theo TTL = refresh interval. Trả compact_table `{ columns, rows, row_count }` — **không** qua token budget (data đi ra browser).
+Chạy lại SQL đã đóng băng (re-validate + row cap `Dashboard:MaxRowsPerWidget` mặc định 5000 + timeout), cache in-memory theo TTL = refresh interval. Trả compact_table `{ columns, rows, row_count }` — **không** qua token budget (data đi ra browser).
 
 ### POST `/api/dashboards/widgets` — `KnowledgeWrite` (MCP tiện lợi)
-Body kèm `dashboard_name` (+ `dashboard_kind` tuỳ chọn ∈ `grid`|`custom`, mặc định `grid`) → tự tạo dashboard theo tên nếu chưa có, rồi tạo widget. `dashboard_kind` **chỉ** áp dụng khi phải tạo dashboard mới; nếu tên đã tồn tại (bất kể kind), field này bị bỏ qua và widget vẫn được gắn vào bình thường.
+Body kèm `dashboard_name` (+ `dashboard_kind` tuỳ chọn ∈ `grid`|`custom`, mặc định `grid`) → tự tạo dashboard theo tên nếu chưa có, rồi tạo widget (cùng route tạo widget nội bộ nên `chart_type` cũng tuỳ chọn, mặc định `table`, xem mục trên). `dashboard_kind` **chỉ** áp dụng khi phải tạo dashboard mới; nếu tên đã tồn tại (bất kể kind), field này bị bỏ qua và widget vẫn được gắn vào bình thường.
 
 ## Dashboard custom page (kind='custom')
 
