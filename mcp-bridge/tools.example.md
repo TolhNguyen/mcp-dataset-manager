@@ -712,7 +712,7 @@ description: |
   QUY TRÌNH BẮT BUỘC khi người dùng yêu cầu "tạo dashboard/báo cáo":
   1. Xác định loại: SNAPSHOT (xem một lần, data đóng băng → dựng artifact
      ngay trong chat, KHÔNG dùng tool này) hay REALTIME (mở lại thấy data
-     mới → dùng tool này). Không rõ thì hỏi người dùng MỘT câu rồi mới làm.
+     mới → dùng tool này). Không rõ thì hỏi người dùng MỘT câu rồi mới làm. Khi người dùng sẽ mở lại dashboard nhiều lần, ƯU TIÊN flow realtime custom này (đẹp tự do + data sống) thay vì chỉ tạo widget grid.
   2. REALTIME: thiết kế POOL DATA trước — dashboard cần những bảng dữ liệu
      nào (đủ chiều cho mọi bộ lọc dự kiến)? Mỗi bảng = 1 endpoint, tạo bằng
      create_dashboard_widget (cần schema_token), cùng dashboard_name —

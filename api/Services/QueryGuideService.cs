@@ -131,6 +131,9 @@ public class QueryGuideService
           request a reload via edm:refresh) and call set_dashboard_html (its description contains
           the REQUIRED postMessage contract). Give the user the returned view_url. Missing data
           later -> add endpoints, then update the HTML.
+        - PREFER the REALTIME custom flow (kind='custom' + set_dashboard_html) whenever the user
+          asks for a dashboard they will reopen: it gives free-form artifact-quality layout with
+          live data. Plain grid widgets (no HTML page) are only for quick single-metric tracking.
         Always visual-first for both kinds: prefer charts and KPI tiles over raw tables, with
         artifact-quality layout. Only the dashboard owner (or Claude via their PAT) can edit
         endpoint SQL; share viewers can never see SQL.
