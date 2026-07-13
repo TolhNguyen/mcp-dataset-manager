@@ -247,7 +247,12 @@ public class DashboardService(
             return ApiResult<object>.Fail(ErrorCodes.DatasetNotFound, "Dataset not found.");
         }
 
-        var fieldError = DashboardGuard.ValidateCreate(req.Title, req.Sql, req.ChartType);
+        // Endpoint của dashboard custom là nguồn dữ liệu thuần — chart_type chỉ còn là nhãn
+        // hiển thị ở tab Endpoints, nên cho phép bỏ trống và mặc định 'table'. Guard phía dưới
+        // vẫn strict: giá trị CÓ gửi lên mà ngoài enum thì vẫn bị chặn như trước.
+        var chartType = string.IsNullOrWhiteSpace(req.ChartType) ? "table" : req.ChartType;
+
+        var fieldError = DashboardGuard.ValidateCreate(req.Title, req.Sql, chartType);
         if (fieldError is not null)
         {
             return ApiResult<object>.Fail(ErrorCodes.ValidationError, fieldError);
@@ -319,7 +324,7 @@ public class DashboardService(
             DatasetId = dataset.Id,
             Title = req.Title!.Trim(),
             Sql = frozenSql,
-            ChartType = req.ChartType,
+            ChartType = chartType,
             ChartConfig = chartConfigJson,
             RefreshIntervalSec = refresh,
             Position = position,
@@ -578,7 +583,7 @@ public class DashboardService(
             return ApiResult<object>.Fail(ErrorCodes.ValidationError, revalidation.Message!);
         }
 
-        var maxRows = configuration.GetValue<int?>("Dashboard:MaxRowsPerWidget") ?? 1000;
+        var maxRows = configuration.GetValue<int?>("Dashboard:MaxRowsPerWidget") ?? 5000;
         // BypassAiBudget: widget data goes straight to the browser, not an AI reader, so the AI
         // token-reading budget must not gate it — only the row cap (maxRows) and command timeout
         // (enforced inside the query service) apply.
