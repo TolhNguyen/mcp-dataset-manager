@@ -55,6 +55,14 @@ const DashboardsPage = {
         window.addEventListener('beforeunload', () => this.clearAllTimers());
 
         await this.loadDashboards();
+
+        // Deep-link support: DashboardService.SetPageByNameAsync returns view_url with a
+        // `?id=` query param that MCP tools hand back to the user/agent — without this, that
+        // link silently dead-ends on the plain list. selectDashboard() already guards a
+        // bad/foreign id via its own try/catch (renders `.error` into #widgetGrid), so no
+        // extra guard is needed here.
+        const deepLinkId = new URLSearchParams(location.search).get('id');
+        if (deepLinkId) this.selectDashboard(deepLinkId);
     },
 
     // ============================================================
